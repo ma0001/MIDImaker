@@ -217,6 +217,7 @@ uv run midimaker bass "path/to/bass_stem.wav" -t "path/to/full_mix.mp3"
 | `--no-monophonic` | オフ | 和音の重複をそのまま残す（デフォルトは単音ラインに自動クリーンアップ） |
 | `--tempo` | `120.0` | MIDIのデフォルトテンポ (BPM) |
 | `-t`, `--tempo-file` | なし | ベースMIDIにマージするテンポMIDIファイル (`.mid`) またはテンポ解析元の音声ファイル (`.mp3`, `.wav`) |
+| `--tempo-tolerance` | `0.8` | テンポ解析元の音声からテンポ抽出する際の揺らぎ平滑化許容幅 (BPM) |
 
 
 ### 🥁 ドラム音源から高精度MIDIを生成 (ADTOF Plus)
@@ -251,6 +252,7 @@ midimaker drums "path/to/drums_stem.wav" -t "path/to/full_mix.mp3"
 | `--min-volume-db` | `-45.0` | ノイズゲート音量閾値 (dB)。休符や無音区間のヒスノイズ誤発火を除外 |
 | `--threshold` | `-inf` | Onset検出感度閾値 |
 | `-t`, `--tempo-file` | なし | ドラムMIDIにマージするテンポMIDIファイル (`.mid`) またはテンポ解析元の音声ファイル (`.mp3`, `.wav`) |
+| `--tempo-tolerance` | `0.8` | テンポ解析元の音声からテンポ抽出する際の揺らぎ平滑化許容幅 (BPM) |
 
 > [!TIP]
 > **GarageBandユーザーへのおすすめワークフロー**
@@ -263,6 +265,8 @@ midimaker drums "path/to/drums_stem.wav" -t "path/to/full_mix.mp3"
 フルミックス楽曲（またはステム音源）からテンポ（BPM）およびビート（拍のタイミング）を高精度に解析し、**テンポ情報のみを含むMIDIファイル（Conductor / Tempo Track MIDI）**を出力します。
 
 DAW（Logic Pro, Cubase, Studio One, Ableton Live等）のプロジェクトに最初にこのテンポMIDIをインポートすることで、**プロジェクト全体のテンポマップが自動構築され、後から読み込むドラムMIDI・ベースMIDI・オーディオ波形が小節グリッドにピタッと吸着**します。
+
+微小なテンポ揺らぎ（ジッター）は**適応型セグメンテーション（Adaptive Segmentation）**によって一定範囲内で平均化されるため、DAW上で同じBPMが毎拍連打されることなくスッキリしたテンポマップが得られます。同時に、徐々に減速するリタルダンド（rit.）や加速（accel.）のトレンド変化には高精度に追従します。
 
 ```bash
 # 基本的な使い方（入力ファイルと同じ場所に _tempo.mid が出力されます）
@@ -277,6 +281,9 @@ uv run midimaker-tempo "path/to/song.mp3"
 
 # テンポマップではなく、代表固定BPM単一で出力したい場合
 uv run midimaker tempo "path/to/song.mp3" --fixed
+
+# テンポ揺らぎの平滑化幅を調整する場合（0以下の場合は平滑化無効）
+uv run midimaker tempo "path/to/song.mp3" --tolerance 1.0
 ```
 
 #### 主なオプション設定
@@ -285,6 +292,7 @@ uv run midimaker tempo "path/to/song.mp3" --fixed
 | :--- | :--- | :--- |
 | `-o`, `--output` | 自動命名 | 出力先MIDIファイルパス (省略時は `{入力名}_tempo.mid`) |
 | `--fixed` | オフ (テンポマップ) | テンポマップ（可変ビート追従）ではなく、楽曲全体の代表BPM単一で出力 |
+| `--tolerance` | `0.8` | 同一区間のテンポ揺らぎとみなして平均化する許容変動幅 (BPM)。0以下の場合は平滑化無効 |
 
 
 

@@ -132,6 +132,7 @@ def transcribe_bass(
     monophonic: bool = True,
     midi_tempo: float = 120.0,
     tempo_file: Optional[Union[str, Path]] = None,
+    tempo_tolerance: float = 0.8,
 ) -> Path:
     """
     ベース音源を解析し、MIDIファイルを出力する
@@ -148,6 +149,7 @@ def transcribe_bass(
         monophonic: Trueの場合、和音重複を解消して単音ラインに整形
         midi_tempo: 出力MIDIのデフォルトテンポ（BPM）
         tempo_file: マージするテンポMIDIファイルパス、またはテンポ解析元の音声ファイルパス
+        tempo_tolerance: テンポ解析時の揺らぎ平滑化許容幅（BPM、デフォルト: 0.8）
 
     Returns:
         生成されたMIDIファイルの Path オブジェクト
@@ -212,6 +214,7 @@ def transcribe_bass(
         merge_tempo_into_midi(
             target_midi_path=output_file,
             tempo_source=tempo_file,
+            tolerance_bpm=tempo_tolerance,
         )
 
     print(f"✨ [完了] ベースMIDIを出力しました: {output_file}")

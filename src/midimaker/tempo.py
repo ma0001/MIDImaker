@@ -55,15 +55,22 @@ def calculate_tempo_map(
     beat_times: List[float],
     min_bpm: float = 40.0,
     max_bpm: float = 300.0,
+    tolerance_bpm: float = 0.8,
+    min_change_bpm: float = 0.1,
 ) -> List[Tuple[float, float]]:
     """
     ビート時刻列から各拍ごとの局所BPMを計算し、テンポマップのキーポイント列を生成する。
+    微小な揺らぎ（ジッター）は適応型セグメンテーションで平均化してイベント連打を防ぎつつ、
+    徐々に加速・減速するリタルダンド（rit.）やアッチェランド（accel.）は確実に追従する。
 
     Parameters:
         overall_bpm: 楽曲全体の代表BPM
         beat_times: ビート発生時刻（秒）のリスト
         min_bpm: 許容する最小BPM
         max_bpm: 許容する最大BPM
+        tolerance_bpm: 同一区間のテンポ揺らぎとみなして平均化する最大変動幅（BPM）。
+                       0.0以下の場合は平滑化を行わず毎拍出力する。
+        min_change_bpm: 新たなテンポチェンジイベントを出力するための直前イベントとの最小BPM差。
 
     Returns:
         list of (time_in_seconds, bpm)
@@ -77,7 +84,8 @@ def calculate_tempo_map(
     if len(beat_times) < 2:
         return tempo_points
 
-    # 各拍区間における局所テンポの算出
+    # 各拍区間における局所テンポ（BPM）を算出
+    raw_points: List[Tuple[float, float]] = []
     for i in range(len(beat_times) - 1):
         t_start = beat_times[i]
         t_end = beat_times[i + 1]
@@ -96,11 +104,54 @@ def calculate_tempo_map(
         elif local_bpm > max_bpm:
             local_bpm = max_bpm
 
-        local_bpm = round(local_bpm, 2)
+        raw_points.append((t_start, local_bpm))
 
-        # 0.0秒の直後すぎる場合を除き、テンポチェンジ点として追加
-        if t_start > 0.05:
-            tempo_points.append((t_start, local_bpm))
+    if not raw_points:
+        return tempo_points
+
+    # 平滑化が無効（tolerance_bpm <= 0）の場合は全拍をそのまま出力
+    if tolerance_bpm <= 0.0:
+        for t_start, local_bpm in raw_points:
+            if t_start > 0.05:
+                tempo_points.append((t_start, round(local_bpm, 2)))
+        return tempo_points
+
+    # 適応型セグメンテーション（Adaptive Segmentation）による揺らぎ平均化
+    # 変動幅（max - min）が tolerance_bpm 以内に収まる区間を同一グループとしてまとめ、
+    # 区間終了時にその平均BPMを代表値として出力する。
+    # 徐々に変化するトレンド（rit./accel.）は変動幅を超えた時点で次の区間へ移行するため正確に追従可能。
+    seg_times: List[float] = [raw_points[0][0]]
+    seg_bpms: List[float] = [raw_points[0][1]]
+    last_emitted_bpm = initial_bpm
+
+    for t_start, bpm in raw_points[1:]:
+        curr_min = min(min(seg_bpms), bpm)
+        curr_max = max(max(seg_bpms), bpm)
+
+        if curr_max - curr_min <= tolerance_bpm:
+            # 許容揺らぎ範囲内: セグメントを継続
+            seg_times.append(t_start)
+            seg_bpms.append(bpm)
+        else:
+            # 許容範囲を超過: 直前までのセグメントの平均BPMを計算して確定
+            avg_bpm = round(float(np.mean(seg_bpms)), 2)
+            seg_start_time = seg_times[0]
+
+            # 0.05秒以前の頭出し直後を除き、直前のテンポと有意な差があれば出力
+            if seg_start_time > 0.05 and abs(avg_bpm - last_emitted_bpm) >= min_change_bpm:
+                tempo_points.append((seg_start_time, avg_bpm))
+                last_emitted_bpm = avg_bpm
+
+            # 新しいセグメントを開始
+            seg_times = [t_start]
+            seg_bpms = [bpm]
+
+    # 末尾の残余セグメントを確定出力
+    if seg_bpms:
+        avg_bpm = round(float(np.mean(seg_bpms)), 2)
+        seg_start_time = seg_times[0]
+        if seg_start_time > 0.05 and abs(avg_bpm - last_emitted_bpm) >= min_change_bpm:
+            tempo_points.append((seg_start_time, avg_bpm))
 
     return tempo_points
 
@@ -167,6 +218,7 @@ def export_tempo_midi(
     audio_path: Union[str, Path],
     output_path: Optional[Union[str, Path]] = None,
     fixed_tempo: bool = False,
+    tolerance_bpm: float = 0.8,
 ) -> Path:
     """
     音声ファイルからテンポを解析し、テンポ専用MIDIファイルを出力するメイン関数。
@@ -175,6 +227,7 @@ def export_tempo_midi(
         audio_path: 入力音声ファイル（フルミックス、ステム等）
         output_path: 出力先MIDIファイル（省略時は入力と同じディレクトリに _tempo.mid で保存）
         fixed_tempo: Trueの場合、テンポマップではなく全体代表BPM単一で出力
+        tolerance_bpm: 同一区間のテンポ揺らぎとみなして平均化する最大変動幅（BPM、デフォルト: 0.8）
 
     Returns:
         生成されたMIDIファイルの Path オブジェクト
@@ -190,6 +243,8 @@ def export_tempo_midi(
 
     print(f"⏱️ [MIDImaker] 楽曲のテンポを解析中: {audio_file.name}")
     print(f"   ├─ 出力モード: {'固定BPM (代表テンポ単一)' if fixed_tempo else 'テンポマップ (可変ビート追従)'}")
+    if not fixed_tempo:
+        print(f"   ├─ 揺らぎ平滑化許容幅: {tolerance_bpm} BPM")
     print(f"   └─ 出力先: {output_file.name}")
 
     # テンポとビートを解析
@@ -201,8 +256,8 @@ def export_tempo_midi(
         # 固定BPMモード
         tempo_points = [(0.0, round(overall_bpm, 2))]
     else:
-        # テンポマップモード
-        tempo_points = calculate_tempo_map(overall_bpm, beat_times)
+        # テンポマップモード（適応型セグメンテーションによる揺らぎ平均化）
+        tempo_points = calculate_tempo_map(overall_bpm, beat_times, tolerance_bpm=tolerance_bpm)
         print(f"   ├─ 生成テンポチェンジ数: {len(tempo_points)} ポイント")
 
     # MIDIファイル作成
@@ -218,6 +273,7 @@ def export_tempo_midi(
 def merge_tempo_into_midi(
     target_midi_path: Union[str, Path],
     tempo_source: Union[str, Path],
+    tolerance_bpm: float = 0.8,
 ) -> None:
     """
     ドラムやベースなどのMIDIファイルに、テンポ情報（MIDIファイルまたは音声ファイルから抽出）を
@@ -227,6 +283,7 @@ def merge_tempo_into_midi(
     Parameters:
         target_midi_path: テンポをマージする対象のMIDIファイル（ドラムMIDI等）
         tempo_source: テンポ情報の提供元（.mid/.midi ファイル、または音声ファイル .mp3/.wav/.m4a 等）
+        tolerance_bpm: 音声からテンポ抽出する際の揺らぎ平滑化許容幅（BPM、デフォルト: 0.8）
     """
     import pretty_midi
 
@@ -250,7 +307,7 @@ def merge_tempo_into_midi(
         # 音声ファイルからその場でテンポ解析
         print(f"⏱️ テンポ音源（{source_path.name}）からビート解析を実行中...")
         overall_bpm, beat_times, _ = extract_tempo_and_beats(source_path)
-        tempo_points = calculate_tempo_map(overall_bpm, beat_times)
+        tempo_points = calculate_tempo_map(overall_bpm, beat_times, tolerance_bpm=tolerance_bpm)
         times_list = [t for t, _ in tempo_points]
         bpms_list = [b for _, b in tempo_points]
 

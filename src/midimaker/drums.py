@@ -57,6 +57,7 @@ def transcribe_drums(
     default_threshold: float = -float("inf"),
     min_volume_db: Optional[float] = -45.0,
     tempo_file: Optional[Union[str, Path]] = None,
+    tempo_tolerance: float = 0.8,
 ) -> Path:
     """
     ドラム音源を解析し、General MIDI規格のドラムMIDIファイルを出力する
@@ -69,6 +70,7 @@ def transcribe_drums(
         default_threshold: ADTOFのOnset検出閾値
         min_volume_db: ノイズゲート音量閾値（dB）。これ以下の微弱音・無音区間のノートを除外
         tempo_file: マージするテンポMIDIファイルパス、またはテンポ解析元の音声ファイルパス
+        tempo_tolerance: テンポ解析時の揺らぎ平滑化許容幅（BPM、デフォルト: 0.8）
 
     Returns:
         生成されたドラムMIDIファイルの Path オブジェクト
@@ -119,6 +121,7 @@ def transcribe_drums(
         merge_tempo_into_midi(
             target_midi_path=output_file,
             tempo_source=tempo_file,
+            tolerance_bpm=tempo_tolerance,
         )
 
     print(f"✨ [完了] ドラムMIDIを出力しました: {output_file}")

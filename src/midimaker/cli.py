@@ -95,6 +95,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="ベースMIDIにマージするテンポMIDIファイル (.mid) またはテンポ解析元の音声ファイル (.mp3, .wav等)",
     )
+    bass_parser.add_argument(
+        "--tempo-tolerance",
+        type=float,
+        default=0.8,
+        help="テンポ解析元の音声からテンポ抽出する際の揺らぎ平滑化許容幅 BPM (デフォルト: 0.8BPM)",
+    )
 
     # ----------------------------------------------------
     # サブコマンド: drums (ドラム音源からMIDI生成)
@@ -139,6 +145,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="ドラムMIDIにマージするテンポMIDIファイル (.mid) またはテンポ解析元の音声ファイル (.mp3, .wav等)",
     )
+    drums_parser.add_argument(
+        "--tempo-tolerance",
+        type=float,
+        default=0.8,
+        help="テンポ解析元の音声からテンポ抽出する際の揺らぎ平滑化許容幅 BPM (デフォルト: 0.8BPM)",
+    )
 
     # ----------------------------------------------------
     # サブコマンド: tempo (楽曲からテンポ専用MIDI生成)
@@ -164,6 +176,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--fixed",
         action="store_true",
         help="テンポマップ（可変ビート追従）ではなく、楽曲全体の代表BPM単一で出力する場合に指定",
+    )
+    tempo_parser.add_argument(
+        "--tolerance",
+        type=float,
+        default=0.8,
+        help="テンポの微小な揺らぎ（ジッター）とみなして平均化する許容変動幅 BPM (デフォルト: 0.8BPM。0以下の場合は平滑化無効)",
     )
 
     return parser
@@ -197,6 +215,7 @@ def main() -> None:
                 monophonic=not args.no_monophonic,
                 midi_tempo=args.tempo,
                 tempo_file=args.tempo_file,
+                tempo_tolerance=args.tempo_tolerance,
             )
         except Exception as e:
             print(f"❌ エラーが発生しました: {e}", file=sys.stderr)
@@ -214,6 +233,7 @@ def main() -> None:
                 default_threshold=args.threshold,
                 min_volume_db=args.min_volume_db if args.min_volume_db > -900 else None,
                 tempo_file=args.tempo_file,
+                tempo_tolerance=args.tempo_tolerance,
             )
         except Exception as e:
             print(f"❌ エラーが発生しました: {e}", file=sys.stderr)
@@ -227,6 +247,7 @@ def main() -> None:
                 audio_path=args.input,
                 output_path=args.output,
                 fixed_tempo=args.fixed,
+                tolerance_bpm=args.tolerance,
             )
         except Exception as e:
             print(f"❌ エラーが発生しました: {e}", file=sys.stderr)
