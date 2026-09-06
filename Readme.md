@@ -212,4 +212,32 @@ uv run midimaker-bass "path/to/bass_stem.wav"
 | `--no-monophonic` | オフ | 和音の重複をそのまま残す（デフォルトは単音ラインに自動クリーンアップ） |
 | `--tempo` | `120.0` | MIDIのデフォルトテンポ (BPM) |
 
+### 🥁 ドラム音源から高精度MIDIを生成 (ADTOF Plus)
+
+ステム分離されたドラム音源（またはフルミックス楽曲）から、DrumSep 5-stems によるパーツ分離、ADTOF Frame_RNN による高精度打点検出、オープン/クローズハイハット判定、ベロシティ推定を行って General MIDI (Ch.10) のドラムMIDIを作成します。
+
+```bash
+# 基本的な使い方（入力ファイルと同じ場所に _drums.mid が出力されます）
+midimaker drums "path/to/drums_stem.wav"
+
+# 出力先を指定する場合
+midimaker drums "path/to/drums_stem.wav" -o "output.mid"
+
+# またはエイリアスコマンド
+midimaker-drums "path/to/drums_stem.wav"
+
+# フルミックス楽曲から直接ドラム分離してMIDI化する場合
+midimaker drums "path/to/full_mix.mp3" --from-mix
+```
+
+#### 主なオプション設定
+
+| オプション | デフォルト値 | 説明 |
+| :--- | :--- | :--- |
+| `-o`, `--output` | 自動命名 | 出力先MIDIファイルパス |
+| `--from-mix` | オフ | フルミックス楽曲からドラムを自動分離して処理（ドラムステム時は不要） |
+| `--min-volume-db` | `-45.0` | ノイズゲート音量閾値 (dB)。休符や無音区間のヒスノイズ誤発火を除外 |
+| `--threshold` | `-inf` | Onset検出感度閾値 |
+
+
 
