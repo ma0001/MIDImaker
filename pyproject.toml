@@ -1,0 +1,24 @@
+[project]
+name = "midimaker"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "ma0001", email = "887765+ma0001@users.noreply.github.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "adtof-plus-drum-transcription",
+    "basic-pitch>=0.4.0",
+    "essentia==2.1b6.dev1389",
+]
+
+[project.scripts]
+midimaker = "midimaker:main"
+
+[build-system]
+requires = ["uv_build>=0.12.9,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+adtof-plus-drum-transcription = { git = "https://github.com/xavriley/adtof_plus_drum_transcription.git" }
