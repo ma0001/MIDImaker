@@ -228,6 +228,11 @@ midimaker-drums "path/to/drums_stem.wav"
 
 # フルミックス楽曲から直接ドラム分離してMIDI化する場合
 midimaker drums "path/to/full_mix.mp3" --from-mix
+
+# テンポ情報（テンポMIDIまたはフルミックス音源）をドラムMIDIにマージする場合（GarageBandにおすすめ！）
+midimaker drums "path/to/drums_stem.wav" -t "path/to/full_mix_tempo.mid"
+# またはフルミックス音源を直接指定して自動マージ
+midimaker drums "path/to/drums_stem.wav" -t "path/to/full_mix.mp3"
 ```
 
 #### 主なオプション設定
@@ -238,6 +243,42 @@ midimaker drums "path/to/full_mix.mp3" --from-mix
 | `--from-mix` | オフ | フルミックス楽曲からドラムを自動分離して処理（ドラムステム時は不要） |
 | `--min-volume-db` | `-45.0` | ノイズゲート音量閾値 (dB)。休符や無音区間のヒスノイズ誤発火を除外 |
 | `--threshold` | `-inf` | Onset検出感度閾値 |
+| `-t`, `--tempo-file` | なし | ドラムMIDIにマージするテンポMIDIファイル (`.mid`) またはテンポ解析元の音声ファイル (`.mp3`, `.wav`) |
+
+> [!TIP]
+> **GarageBandユーザーへのおすすめワークフロー**
+> GarageBandはノートが存在しないテンポ専用MIDIのインポートに対応していません。
+> `midimaker drums "drums.wav" -t "song.mp3"` で**テンポ情報をマージしたドラムMIDI**を生成し、FinderでそのドラムMIDIを **右クリック ＞「このアプリケーションで開く ＞ GarageBand」** することで、プロジェクトのテンポ（BPM）が自動設定された状態でプロジェクトをスタートできます。
+
+
+### ⏱️ 楽曲からテンポ専用MIDI（Tempo Track）を生成 (Essentia)
+
+フルミックス楽曲（またはステム音源）からテンポ（BPM）およびビート（拍のタイミング）を高精度に解析し、**テンポ情報のみを含むMIDIファイル（Conductor / Tempo Track MIDI）**を出力します。
+
+DAW（Logic Pro, Cubase, Studio One, Ableton Live等）のプロジェクトに最初にこのテンポMIDIをインポートすることで、**プロジェクト全体のテンポマップが自動構築され、後から読み込むドラムMIDI・ベースMIDI・オーディオ波形が小節グリッドにピタッと吸着**します。
+
+```bash
+# 基本的な使い方（入力ファイルと同じ場所に _tempo.mid が出力されます）
+# デフォルトで楽曲の揺らぎに追従する「テンポマップ」を出力（数秒で完了）
+uv run midimaker tempo "path/to/song.mp3"
+
+# 出力先を指定する場合
+uv run midimaker tempo "path/to/song.mp3" -o "tempo_map.mid"
+
+# またはエイリアスコマンド
+uv run midimaker-tempo "path/to/song.mp3"
+
+# テンポマップではなく、代表固定BPM単一で出力したい場合
+uv run midimaker tempo "path/to/song.mp3" --fixed
+```
+
+#### 主なオプション設定
+
+| オプション | デフォルト値 | 説明 |
+| :--- | :--- | :--- |
+| `-o`, `--output` | 自動命名 | 出力先MIDIファイルパス (省略時は `{入力名}_tempo.mid`) |
+| `--fixed` | オフ (テンポマップ) | テンポマップ（可変ビート追従）ではなく、楽曲全体の代表BPM単一で出力 |
+
 
 
 

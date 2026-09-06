@@ -56,6 +56,7 @@ def transcribe_drums(
     input_is_mix: bool = False,
     default_threshold: float = -float("inf"),
     min_volume_db: Optional[float] = -45.0,
+    tempo_file: Optional[Union[str, Path]] = None,
 ) -> Path:
     """
     ドラム音源を解析し、General MIDI規格のドラムMIDIファイルを出力する
@@ -67,6 +68,7 @@ def transcribe_drums(
                       すでにステム分離されたドラム音源の場合はFalse（高速処理）。
         default_threshold: ADTOFのOnset検出閾値
         min_volume_db: ノイズゲート音量閾値（dB）。これ以下の微弱音・無音区間のノートを除外
+        tempo_file: マージするテンポMIDIファイルパス、またはテンポ解析元の音声ファイルパス
 
     Returns:
         生成されたドラムMIDIファイルの Path オブジェクト
@@ -84,6 +86,8 @@ def transcribe_drums(
     print(f"   ├─ 入力モード: {'フルミックス（自動分離）' if input_is_mix else 'ドラムステム（パーツ分離＆転写）'}")
     if min_volume_db is not None:
         print(f"   ├─ ノイズゲート: {min_volume_db} dB 以下の微弱音を除外")
+    if tempo_file is not None:
+        print(f"   ├─ テンポ音源/MIDI: {Path(tempo_file).name} (完了後にマージ)")
     print(f"   └─ 出力先: {output_file.name}")
 
     # ADTOF Plus の推論モジュールを遅延インポート
@@ -108,5 +112,15 @@ def transcribe_drums(
             min_volume_db=min_volume_db,
         )
 
+    # テンポ情報のマージ（テンポMIDIまたは音声ファイルが指定されている場合）
+    if tempo_file is not None and output_file.exists():
+        from midimaker.tempo import merge_tempo_into_midi
+
+        merge_tempo_into_midi(
+            target_midi_path=output_file,
+            tempo_source=tempo_file,
+        )
+
     print(f"✨ [完了] ドラムMIDIを出力しました: {output_file}")
     return output_file
+

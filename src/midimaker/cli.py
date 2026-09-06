@@ -127,6 +127,38 @@ def build_parser() -> argparse.ArgumentParser:
         default=-float("inf"),
         help="Onset検出の閾値 (デフォルト: -inf)",
     )
+    drums_parser.add_argument(
+        "-t", "--tempo-file",
+        type=str,
+        default=None,
+        help="ドラムMIDIにマージするテンポMIDIファイル (.mid) またはテンポ解析元の音声ファイル (.mp3, .wav等)",
+    )
+
+    # ----------------------------------------------------
+    # サブコマンド: tempo (楽曲からテンポ専用MIDI生成)
+    # ----------------------------------------------------
+    tempo_parser = subparsers.add_parser(
+        "tempo",
+        help="楽曲からテンポ（BPM）やビートを解析し、テンポ専用MIDI（Tempo Track）を生成",
+        description="Essentiaを活用して楽曲のテンポ変化（テンポマップ）を高精度に解析し、DAWのグリッド同期用MIDIを出力します。",
+    )
+
+    tempo_parser.add_argument(
+        "input",
+        type=str,
+        help="入力音声ファイルのパス (MP3, WAV, FLAC, M4A等)",
+    )
+    tempo_parser.add_argument(
+        "-o", "--output",
+        type=str,
+        default=None,
+        help="出力先MIDIファイルパス (省略時は入力ファイル名_tempo.mid)",
+    )
+    tempo_parser.add_argument(
+        "--fixed",
+        action="store_true",
+        help="テンポマップ（可変ビート追従）ではなく、楽曲全体の代表BPM単一で出力する場合に指定",
+    )
 
     return parser
 
@@ -174,6 +206,20 @@ def main() -> None:
                 input_is_mix=args.from_mix,
                 default_threshold=args.threshold,
                 min_volume_db=args.min_volume_db if args.min_volume_db > -900 else None,
+                tempo_file=args.tempo_file,
+            )
+        except Exception as e:
+            print(f"❌ エラーが発生しました: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif args.command == "tempo":
+        from midimaker.tempo import export_tempo_midi
+
+        try:
+            export_tempo_midi(
+                audio_path=args.input,
+                output_path=args.output,
+                fixed_tempo=args.fixed,
             )
         except Exception as e:
             print(f"❌ エラーが発生しました: {e}", file=sys.stderr)
@@ -195,3 +241,11 @@ def drums_cli() -> None:
     if len(sys.argv) > 1 and sys.argv[1] != "drums":
         sys.argv.insert(1, "drums")
     main()
+
+
+def tempo_cli() -> None:
+    """midimaker-tempo コマンドとして直接テンポMIDI生成を実行するエントリーポイント"""
+    if len(sys.argv) > 1 and sys.argv[1] != "tempo":
+        sys.argv.insert(1, "tempo")
+    main()
+
