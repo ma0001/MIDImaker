@@ -89,6 +89,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=120.0,
         help="MIDIのデフォルトテンポ BPM (デフォルト: 120.0)",
     )
+    bass_parser.add_argument(
+        "-t", "--tempo-file",
+        type=str,
+        default=None,
+        help="ベースMIDIにマージするテンポMIDIファイル (.mid) またはテンポ解析元の音声ファイル (.mp3, .wav等)",
+    )
 
     # ----------------------------------------------------
     # サブコマンド: drums (ドラム音源からMIDI生成)
@@ -190,6 +196,7 @@ def main() -> None:
                 min_volume_db=args.min_volume_db if args.min_volume_db > -900 else None,
                 monophonic=not args.no_monophonic,
                 midi_tempo=args.tempo,
+                tempo_file=args.tempo_file,
             )
         except Exception as e:
             print(f"❌ エラーが発生しました: {e}", file=sys.stderr)

@@ -196,6 +196,11 @@ uv run midimaker bass "path/to/bass_stem.wav" -o "output.mid"
 
 # またはエイリアスコマンド
 uv run midimaker-bass "path/to/bass_stem.wav"
+
+# テンポ情報（テンポMIDIまたはフルミックス音源）をベースMIDIにマージする場合
+uv run midimaker bass "path/to/bass_stem.wav" -t "path/to/full_mix_tempo.mid"
+# またはフルミックス音源を直接指定して自動マージ（ドラムとタイミングが完全一致します）
+uv run midimaker bass "path/to/bass_stem.wav" -t "path/to/full_mix.mp3"
 ```
 
 #### 主なオプション設定
@@ -211,6 +216,8 @@ uv run midimaker-bass "path/to/bass_stem.wav"
 | `--min-volume-db` | `-45.0` | ノイズゲート音量閾値 (dB)。これ以下の微小音・休符・無音区間のノートを除外 |
 | `--no-monophonic` | オフ | 和音の重複をそのまま残す（デフォルトは単音ラインに自動クリーンアップ） |
 | `--tempo` | `120.0` | MIDIのデフォルトテンポ (BPM) |
+| `-t`, `--tempo-file` | なし | ベースMIDIにマージするテンポMIDIファイル (`.mid`) またはテンポ解析元の音声ファイル (`.mp3`, `.wav`) |
+
 
 ### 🥁 ドラム音源から高精度MIDIを生成 (ADTOF Plus)
 
