@@ -1,0 +1,155 @@
+"""
+ベース音源（WAV/MP3等）からクリーンなMIDIを生成するモジュール
+Basic Pitchをベースに、低域最適化とモノフォニック（単音）整形を行います。
+"""
+
+import os
+import sys
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Optional, Union
+import pretty_midi
+
+
+@contextmanager
+def suppress_c_stdout():
+    """
+    CoreMLやC++バックエンドなどのネイティブ層が出力する
+    不要なデバッグプリント（shape/isfinite等）を抑制するコンテキストマネージャ
+    """
+    # バッファ内の出力を事前に画面へ出し切る
+    sys.stdout.flush()
+    sys.stderr.flush()
+    try:
+        # /dev/null をオープン
+        null_fd = os.open(os.devnull, os.O_RDWR)
+        # 現在の stdout, stderr のファイルディスクリプタを退避
+        save_stdout_fd = os.dup(1)
+        save_stderr_fd = os.dup(2)
+        # stdout, stderr を /dev/null にリダイレクト
+        os.dup2(null_fd, 1)
+        os.dup2(null_fd, 2)
+        yield
+    finally:
+        # 元の stdout, stderr に復元
+        os.dup2(save_stdout_fd, 1)
+        os.dup2(save_stderr_fd, 2)
+        os.close(null_fd)
+        os.close(save_stdout_fd)
+        os.close(save_stderr_fd)
+
+
+def make_monophonic(instrument: pretty_midi.Instrument) -> pretty_midi.Instrument:
+    """
+    ベースパートをモノフォニック（単音）に整形する関数
+    
+    - 同時発音がある場合: より低いピッチ（ベースの基音）を優先
+    - 音が被っている場合: 次のノートが発音されたタイミングで前のノートを終了
+    """
+    if not instrument.notes:
+        return instrument
+
+    # 開始時間順、同じ開始時間ならピッチが低い順（基音優先）にソート
+    sorted_notes = sorted(instrument.notes, key=lambda n: (n.start, n.pitch))
+
+    monophonic_notes: list[pretty_midi.Note] = []
+
+    for current_note in sorted_notes:
+        if not monophonic_notes:
+            monophonic_notes.append(current_note)
+            continue
+
+        prev_note = monophonic_notes[-1]
+
+        # 1. ほぼ同時に鳴った音（誤差15ms以内）の場合:
+        # すでにピッチ昇順でソートされているので、最初に追加された低い音（基音）を保持し、
+        # 高い方の音（倍音誤検出の可能性大）はスキップする
+        if abs(current_note.start - prev_note.start) < 0.015:
+            continue
+
+        # 2. 前のノートが鳴っている最中に次のノートが始まった場合:
+        # 前のノートの終了時間を次のノートの開始時間に揃えてカット（チョーク）する
+        if prev_note.end > current_note.start:
+            prev_note.end = current_note.start
+
+        # ノートの長さが正である場合のみ追加
+        if current_note.end > current_note.start:
+            monophonic_notes.append(current_note)
+
+    # 整形したノートリストで更新
+    instrument.notes = monophonic_notes
+    return instrument
+
+
+def transcribe_bass(
+    audio_path: Union[str, Path],
+    output_path: Optional[Union[str, Path]] = None,
+    onset_threshold: float = 0.55,
+    frame_threshold: float = 0.35,
+    minimum_note_length: float = 80.0,
+    min_freq: float = 30.0,
+    max_freq: float = 800.0,
+    monophonic: bool = True,
+    midi_tempo: float = 120.0,
+) -> Path:
+    """
+    ベース音源を解析し、MIDIファイルを出力する
+
+    Parameters:
+        audio_path: 入力音声ファイル（WAV, MP3, FLAC等）
+        output_path: 出力先MIDIファイルパス（省略時は入力と同じディレクトリに _bass.mid で保存）
+        onset_threshold: 発音（アタック）の検出閾値（0.0〜1.0）。上げるほど誤検出が減る
+        frame_threshold: 音の持続判定の閾値（0.0〜1.0）
+        minimum_note_length: 最小ノート長（ミリ秒）。短すぎるノイズを除外
+        min_freq: 検出する最低周波数（Hz）。5弦ベースのLow B (~31Hz) を考慮してデフォルト30Hz
+        max_freq: 検出する最高周波数（Hz）。ベース帯域に絞り高域ノイズ・他パート漏れをカット
+        monophonic: Trueの場合、和音重複を解消して単音ラインに整形
+        midi_tempo: 出力MIDIのデフォルトテンポ（BPM）
+
+    Returns:
+        生成されたMIDIファイルの Path オブジェクト
+    """
+    audio_file = Path(audio_path).resolve()
+    if not audio_file.exists():
+        raise FileNotFoundError(f"音声ファイルが見つかりません: {audio_file}")
+
+    if output_path is None:
+        output_file = audio_file.with_name(f"{audio_file.stem}_bass.mid")
+    else:
+        output_file = Path(output_path).resolve()
+
+    print(f"🎸 [MIDImaker] ベース音源を解析中: {audio_file.name}")
+    print(f"   ├─ 周波数範囲: {min_freq} Hz ~ {max_freq} Hz")
+    print(f"   ├─ 感度設定: Onset={onset_threshold}, Frame={frame_threshold}, MinLength={minimum_note_length}ms")
+    print(f"   └─ 単音化 (Monophonic): {'有効' if monophonic else '無効'}")
+
+    # 不要なC層/CoreML等のデバッグ出力や警告を抑制しながら Basic Pitch で推論実行
+    with suppress_c_stdout():
+        from basic_pitch.inference import predict
+
+        _, midi_data, _ = predict(
+            audio_path=audio_file,
+            onset_threshold=onset_threshold,
+            frame_threshold=frame_threshold,
+            minimum_note_length=minimum_note_length,
+            minimum_frequency=min_freq,
+            maximum_frequency=max_freq,
+            multiple_pitch_bends=False,  # ベースラインを安定させるためOFF
+            midi_tempo=midi_tempo,
+        )
+
+    # モノフォニック（単音）整形処理
+    if monophonic:
+        for instrument in midi_data.instruments:
+            # ドラム以外のトラックを整形
+            if not instrument.is_drum:
+                make_monophonic(instrument)
+
+    # 出力先ディレクトリが存在しない場合は作成
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+
+    # MIDIファイル書き出し
+    midi_data.write(str(output_file))
+    print(f"✨ [完了] ベースMIDIを出力しました: {output_file}")
+
+    return output_file

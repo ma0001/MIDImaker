@@ -181,3 +181,34 @@ cd ..
 uv add --workspace adtof_plus_drum_transcription
 ```
 
+## MIDImaker CLI の使い方
+
+### 🎸 ベース音源からクリーンなMIDIを生成 (Spotify Basic Pitch)
+
+ステム分離されたベース音源（WAV, MP3等）から、低音域最適化＆モノフォニック（単音）整形を行ってMIDIを作成します。
+
+```bash
+# 基本的な使い方（入力ファイルと同じ場所に _bass.mid が出力されます）
+uv run midimaker bass "path/to/bass_stem.wav"
+
+# 出力ファイル名を指定する場合
+uv run midimaker bass "path/to/bass_stem.wav" -o "output.mid"
+
+# またはエイリアスコマンド
+uv run midimaker-bass "path/to/bass_stem.wav"
+```
+
+#### 主なオプション設定
+
+| オプション | デフォルト値 | 説明 |
+| :--- | :--- | :--- |
+| `-o`, `--output` | 自動命名 | 出力先MIDIファイルパス |
+| `--onset-threshold` | `0.55` | アタック判定感度 (0.0〜1.0)。数値を上げるとゴースト音やノイズが減ります |
+| `--frame-threshold` | `0.35` | 持続判定感度 (0.0〜1.0) |
+| `--min-note-length` | `80.0` | 最小ノート長 (ms)。短すぎるノイズをスキップ |
+| `--min-freq` | `30.0` | 検出最低周波数 (Hz)。5弦ベースのLow-Bまでカバー |
+| `--max-freq` | `800.0` | 検出最高周波数 (Hz)。ベース帯域に絞り、不要な高域ノイズをカット |
+| `--no-monophonic` | オフ | 和音の重複をそのまま残す（デフォルトは単音ラインに自動クリーンアップ） |
+| `--tempo` | `120.0` | MIDIのデフォルトテンポ (BPM) |
+
+

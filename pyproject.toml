@@ -11,10 +11,13 @@ dependencies = [
     "adtof-plus-drum-transcription",
     "basic-pitch>=0.4.0",
     "essentia==2.1b6.dev1389",
+    "onnxruntime>=1.29.0",
+    "setuptools<80",
 ]
 
 [project.scripts]
 midimaker = "midimaker:main"
+midimaker-bass = "midimaker:bass_cli"
 
 [build-system]
 requires = ["uv_build>=0.12.9,<0.13.0"]
