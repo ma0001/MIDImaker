@@ -81,6 +81,45 @@ def make_monophonic(instrument: pretty_midi.Instrument) -> pretty_midi.Instrumen
     return instrument
 
 
+def filter_by_volume_gate(
+    instrument: pretty_midi.Instrument,
+    audio_path: Path,
+    min_volume_db: float = -45.0,
+) -> pretty_midi.Instrument:
+    """
+    元の音声波形の音量（RMS）をノート区間ごとに計算し、
+    指定したデシベル（dB）未満の微小ノイズノートを除去するノイズゲート関数
+    """
+    import numpy as np
+    import soundfile as sf
+
+    audio, sr = sf.read(str(audio_path))
+    # ステレオの場合はモノラル化
+    if audio.ndim > 1:
+        audio = audio.mean(axis=1)
+
+    audio_len = len(audio)
+    gated_notes: list[pretty_midi.Note] = []
+
+    for note in instrument.notes:
+        start_idx = max(0, int(note.start * sr))
+        end_idx = min(audio_len, int(note.end * sr))
+
+        if start_idx >= end_idx:
+            continue
+
+        chunk = audio[start_idx:end_idx]
+        rms = np.sqrt(np.mean(chunk**2))
+        db = 20 * np.log10(rms) if rms > 1e-7 else -100.0
+
+        # 音量が閾値以上のノートのみ採用
+        if db >= min_volume_db:
+            gated_notes.append(note)
+
+    instrument.notes = gated_notes
+    return instrument
+
+
 def transcribe_bass(
     audio_path: Union[str, Path],
     output_path: Optional[Union[str, Path]] = None,
@@ -89,6 +128,7 @@ def transcribe_bass(
     minimum_note_length: float = 80.0,
     min_freq: float = 30.0,
     max_freq: float = 800.0,
+    min_volume_db: Optional[float] = -45.0,
     monophonic: bool = True,
     midi_tempo: float = 120.0,
 ) -> Path:
@@ -121,6 +161,8 @@ def transcribe_bass(
     print(f"🎸 [MIDImaker] ベース音源を解析中: {audio_file.name}")
     print(f"   ├─ 周波数範囲: {min_freq} Hz ~ {max_freq} Hz")
     print(f"   ├─ 感度設定: Onset={onset_threshold}, Frame={frame_threshold}, MinLength={minimum_note_length}ms")
+    if min_volume_db is not None:
+        print(f"   ├─ ノイズゲート: {min_volume_db} dB 以下の微弱音を除外")
     print(f"   └─ 単音化 (Monophonic): {'有効' if monophonic else '無効'}")
 
     # 不要なC層/CoreML等のデバッグ出力や警告を抑制しながら Basic Pitch で推論実行
@@ -138,7 +180,13 @@ def transcribe_bass(
             midi_tempo=midi_tempo,
         )
 
-    # モノフォニック（単音）整形処理
+    # 1. 音量ノイズゲート処理（休符や無音区間のヒスノイズ誤検出を一掃）
+    if min_volume_db is not None:
+        for instrument in midi_data.instruments:
+            if not instrument.is_drum:
+                filter_by_volume_gate(instrument, audio_file, min_volume_db=min_volume_db)
+
+    # 2. モノフォニック（単音）整形処理
     if monophonic:
         for instrument in midi_data.instruments:
             # ドラム以外のトラックを整形

@@ -73,6 +73,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="検出する最高周波数 (Hz, デフォルト: 800.0Hz)",
     )
     bass_parser.add_argument(
+        "--min-volume-db",
+        type=float,
+        default=-45.0,
+        help="ノイズゲートの音量閾値 dB (デフォルト: -45.0dB)。これ以下の微小音・無音区間のノートを除外 (無効にする場合は -999 等を指定)",
+    )
+    bass_parser.add_argument(
         "--no-monophonic",
         action="store_true",
         help="単音化（モノフォニック）整形を無効にする（和音重複を許可する場合に指定）",
@@ -111,6 +117,7 @@ def main() -> None:
                 minimum_note_length=args.min_note_length,
                 min_freq=args.min_freq,
                 max_freq=args.max_freq,
+                min_volume_db=args.min_volume_db if args.min_volume_db > -900 else None,
                 monophonic=not args.no_monophonic,
                 midi_tempo=args.tempo,
             )
