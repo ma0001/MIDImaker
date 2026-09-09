@@ -130,8 +130,9 @@ def transcribe_bass(
     max_freq: float = 800.0,
     min_volume_db: Optional[float] = -45.0,
     monophonic: bool = True,
-    midi_tempo: float = 120.0,
+    tempo: Optional[Union[float, int, str, Path]] = 120.0,
     tempo_file: Optional[Union[str, Path]] = None,
+    midi_tempo: Optional[float] = None,
     tempo_tolerance: float = 0.8,
 ) -> Path:
     """
@@ -147,13 +148,16 @@ def transcribe_bass(
         max_freq: 検出する最高周波数（Hz）。ベース帯域に絞り高域ノイズ・他パート漏れをカット
         min_volume_db: ノイズゲート音量閾値（dB）。これ以下の微小音・無音区間のノートを除外
         monophonic: Trueの場合、和音重複を解消して単音ラインに整形
-        midi_tempo: 出力MIDIのデフォルトテンポ（BPM）
-        tempo_file: マージするテンポMIDIファイルパス、またはテンポ解析元の音声ファイルパス
+        tempo: 出力MIDIのテンポBPM数値（例: 120, 140）またはテンポMIDI/解析元音声ファイルパス
+        tempo_file: (互換性用) マージするテンポMIDI/音声ファイルパス
+        midi_tempo: (互換性用) 出力MIDIのデフォルトテンポ（BPM）
         tempo_tolerance: テンポ解析時の揺らぎ平滑化許容幅（BPM、デフォルト: 0.8）
 
     Returns:
         生成されたMIDIファイルの Path オブジェクト
     """
+    from midimaker.tempo import parse_tempo_input
+
     audio_file = Path(audio_path).resolve()
     if not audio_file.exists():
         raise FileNotFoundError(f"音声ファイルが見つかりません: {audio_file}")
@@ -163,14 +167,28 @@ def transcribe_bass(
     else:
         output_file = Path(output_path).resolve()
 
+    # テンポ指定の解決（tempo引数優先、未指定時は互換引数チェック）
+    if tempo_file is not None:
+        raw_tempo = tempo_file
+    elif midi_tempo is not None:
+        raw_tempo = midi_tempo
+    else:
+        raw_tempo = tempo
+
+    parsed_bpm, target_tempo_file = parse_tempo_input(raw_tempo)
+    # 推論時テンポ（数値指定があればその値、ファイル指定ならデフォルト120.0）
+    inference_bpm = parsed_bpm if parsed_bpm is not None else 120.0
+
     print(f"🎸 [MIDImaker] ベース音源を解析中: {audio_file.name}")
     print(f"   ├─ 周波数範囲: {min_freq} Hz ~ {max_freq} Hz")
     print(f"   ├─ 感度設定: Onset={onset_threshold}, Frame={frame_threshold}, MinLength={minimum_note_length}ms")
     if min_volume_db is not None:
         print(f"   ├─ ノイズゲート: {min_volume_db} dB 以下の微弱音を除外")
     print(f"   ├─ 単音化 (Monophonic): {'有効' if monophonic else '無効'}")
-    if tempo_file is not None:
-        print(f"   ├─ テンポ音源/MIDI: {Path(tempo_file).name} (完了後にマージ)")
+    if target_tempo_file is not None:
+        print(f"   ├─ テンポ音源/MIDI: {target_tempo_file.name} (完了後にマージ)")
+    else:
+        print(f"   ├─ テンポ: {inference_bpm:.1f} BPM")
     print(f"   └─ 出力先: {output_file.name}")
 
     # 不要なC層/CoreML等のデバッグ出力や警告を抑制しながら Basic Pitch で推論実行
@@ -185,7 +203,7 @@ def transcribe_bass(
             minimum_frequency=min_freq,
             maximum_frequency=max_freq,
             multiple_pitch_bends=False,  # ベースラインを安定させるためOFF
-            midi_tempo=midi_tempo,
+            midi_tempo=inference_bpm,
         )
 
     # 1. 音量ノイズゲート処理（休符や無音区間のヒスノイズ誤検出を一掃）
@@ -208,12 +226,12 @@ def transcribe_bass(
     midi_data.write(str(output_file))
 
     # 3. テンポ情報のマージ（テンポMIDIまたは音声ファイルが指定されている場合）
-    if tempo_file is not None and output_file.exists():
+    if target_tempo_file is not None and output_file.exists():
         from midimaker.tempo import merge_tempo_into_midi
 
         merge_tempo_into_midi(
             target_midi_path=output_file,
-            tempo_source=tempo_file,
+            tempo_source=target_tempo_file,
             tolerance_bpm=tempo_tolerance,
         )
 

@@ -270,19 +270,60 @@ def export_tempo_midi(
     return output_file
 
 
+def parse_tempo_input(
+    tempo_val: Optional[Union[float, int, str, Path]],
+) -> Tuple[Optional[float], Optional[Path]]:
+    """
+    テンポ引数（数値BPMまたはファイルパス）を判定・解析するヘルパー関数。
+
+    Parameters:
+        tempo_val: BPM数値（float/int、または数値文字列 "120" 等）、
+                   またはテンポMIDI/解析元音声のファイルパス（str, Path）
+
+    Returns:
+        tuple: (bpm, tempo_file)
+            - 数値の場合: (float(bpm), None)
+            - ファイルパスの場合: (None, Path(tempo_file))
+            - None または空文字の場合: (None, None)
+    """
+    if tempo_val is None:
+        return None, None
+
+    if isinstance(tempo_val, (int, float)):
+        return float(tempo_val), None
+
+    if isinstance(tempo_val, Path):
+        return None, tempo_val
+
+    val_str = str(tempo_val).strip()
+    if not val_str:
+        return None, None
+
+    # 数値文字列かどうかを判定（例: "120", "140.5"）
+    try:
+        bpm = float(val_str)
+        if bpm > 0:
+            return bpm, None
+    except ValueError:
+        pass
+
+    # 数値に変換できない文字列はファイルパスとして解釈
+    return None, Path(val_str)
+
+
 def merge_tempo_into_midi(
     target_midi_path: Union[str, Path],
-    tempo_source: Union[str, Path],
+    tempo_source: Union[str, Path, float, int],
     tolerance_bpm: float = 0.8,
 ) -> None:
     """
-    ドラムやベースなどのMIDIファイルに、テンポ情報（MIDIファイルまたは音声ファイルから抽出）を
+    ドラムやベースなどのMIDIファイルに、テンポ情報（固定BPM数値、MIDIファイル、または音声ファイルから抽出）を
     解像度（PPQ）の整合性を保ちながらマージ（上書き保存）する。
     ノートの実時間（秒）を厳密に保持し、新しいテンポマップのグリッドに再配置する。
 
     Parameters:
         target_midi_path: テンポをマージする対象のMIDIファイル（ドラムMIDI等）
-        tempo_source: テンポ情報の提供元（.mid/.midi ファイル、または音声ファイル .mp3/.wav/.m4a 等）
+        tempo_source: テンポ情報の提供元（float/int等の数値BPM、.mid/.midi ファイル、または音声ファイル .mp3/.wav/.m4a 等）
         tolerance_bpm: 音声からテンポ抽出する際の揺らぎ平滑化許容幅（BPM、デフォルト: 0.8）
     """
     import pretty_midi
@@ -291,25 +332,36 @@ def merge_tempo_into_midi(
     if not target_file.exists():
         raise FileNotFoundError(f"対象MIDIファイルが見つかりません: {target_file}")
 
-    source_path = Path(tempo_source).resolve()
-    if not source_path.exists():
-        raise FileNotFoundError(f"テンポ音源/MIDIファイルが見つかりません: {source_path}")
+    # 数値BPMかファイルパスかを判定
+    bpm_val, file_path = parse_tempo_input(tempo_source)
 
-    # 1. tempo_source から (times, bpms) を取得
-    suffix = source_path.suffix.lower()
-    if suffix in [".mid", ".midi"]:
-        # テンポMIDIファイルから取得
-        pm_source = pretty_midi.PrettyMIDI(str(source_path))
-        times, bpms = pm_source.get_tempo_changes()
-        times_list = times.tolist()
-        bpms_list = bpms.tolist()
+    if bpm_val is not None:
+        # 1-a. 数値BPMが指定された場合: 単一の固定テンポを設定
+        times_list = [0.0]
+        bpms_list = [bpm_val]
+    elif file_path is not None:
+        # 1-b. ファイルパスが指定された場合: MIDIファイルまたは音声ファイルからテンポ抽出
+        source_path = file_path.resolve()
+        if not source_path.exists():
+            raise FileNotFoundError(f"テンポ音源/MIDIファイルが見つかりません: {source_path}")
+
+        suffix = source_path.suffix.lower()
+        if suffix in [".mid", ".midi"]:
+            # テンポMIDIファイルから取得
+            pm_source = pretty_midi.PrettyMIDI(str(source_path))
+            times, bpms = pm_source.get_tempo_changes()
+            times_list = times.tolist()
+            bpms_list = bpms.tolist()
+        else:
+            # 音声ファイルからその場でテンポ解析
+            print(f"⏱️ テンポ音源（{source_path.name}）からビート解析を実行中...")
+            overall_bpm, beat_times, _ = extract_tempo_and_beats(source_path)
+            tempo_points = calculate_tempo_map(overall_bpm, beat_times, tolerance_bpm=tolerance_bpm)
+            times_list = [t for t, _ in tempo_points]
+            bpms_list = [b for _, b in tempo_points]
     else:
-        # 音声ファイルからその場でテンポ解析
-        print(f"⏱️ テンポ音源（{source_path.name}）からビート解析を実行中...")
-        overall_bpm, beat_times, _ = extract_tempo_and_beats(source_path)
-        tempo_points = calculate_tempo_map(overall_bpm, beat_times, tolerance_bpm=tolerance_bpm)
-        times_list = [t for t, _ in tempo_points]
-        bpms_list = [b for _, b in tempo_points]
+        print("⚠️ テンポ情報が指定されていないため、マージをスキップします")
+        return
 
     if not times_list:
         print("⚠️ テンポ情報が取得できなかったため、マージをスキップします")

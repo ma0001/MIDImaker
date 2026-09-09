@@ -84,16 +84,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="単音化（モノフォニック）整形を無効にする（和音重複を許可する場合に指定）",
     )
     bass_parser.add_argument(
-        "--tempo",
-        type=float,
-        default=120.0,
-        help="MIDIのデフォルトテンポ BPM (デフォルト: 120.0)",
-    )
-    bass_parser.add_argument(
-        "-t", "--tempo-file",
+        "-t", "--tempo",
         type=str,
-        default=None,
-        help="ベースMIDIにマージするテンポMIDIファイル (.mid) またはテンポ解析元の音声ファイル (.mp3, .wav等)",
+        default="120.0",
+        help="MIDIのテンポBPM数値（例: 120, 140）またはマージするテンポMIDI/解析元音声ファイルパス（.mid, .mp3等。デフォルト: 120.0）",
     )
     bass_parser.add_argument(
         "--tempo-tolerance",
@@ -140,10 +134,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Onset検出の閾値 (デフォルト: -inf)",
     )
     drums_parser.add_argument(
-        "-t", "--tempo-file",
+        "-t", "--tempo",
         type=str,
         default=None,
-        help="ドラムMIDIにマージするテンポMIDIファイル (.mid) またはテンポ解析元の音声ファイル (.mp3, .wav等)",
+        help="ドラムMIDIに設定するテンポBPM数値（例: 120, 140）またはマージするテンポMIDI/解析元音声ファイルパス（.mid, .mp3等）",
     )
     drums_parser.add_argument(
         "--tempo-tolerance",
@@ -213,8 +207,7 @@ def main() -> None:
                 max_freq=args.max_freq,
                 min_volume_db=args.min_volume_db if args.min_volume_db > -900 else None,
                 monophonic=not args.no_monophonic,
-                midi_tempo=args.tempo,
-                tempo_file=args.tempo_file,
+                tempo=args.tempo,
                 tempo_tolerance=args.tempo_tolerance,
             )
         except Exception as e:
@@ -232,7 +225,7 @@ def main() -> None:
                 input_is_mix=args.from_mix,
                 default_threshold=args.threshold,
                 min_volume_db=args.min_volume_db if args.min_volume_db > -900 else None,
-                tempo_file=args.tempo_file,
+                tempo=args.tempo,
                 tempo_tolerance=args.tempo_tolerance,
             )
         except Exception as e:

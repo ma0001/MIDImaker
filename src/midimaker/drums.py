@@ -56,6 +56,7 @@ def transcribe_drums(
     input_is_mix: bool = False,
     default_threshold: float = -float("inf"),
     min_volume_db: Optional[float] = -45.0,
+    tempo: Optional[Union[float, int, str, Path]] = None,
     tempo_file: Optional[Union[str, Path]] = None,
     tempo_tolerance: float = 0.8,
 ) -> Path:
@@ -69,12 +70,15 @@ def transcribe_drums(
                       すでにステム分離されたドラム音源の場合はFalse（高速処理）。
         default_threshold: ADTOFのOnset検出閾値
         min_volume_db: ノイズゲート音量閾値（dB）。これ以下の微弱音・無音区間のノートを除外
-        tempo_file: マージするテンポMIDIファイルパス、またはテンポ解析元の音声ファイルパス
+        tempo: 出力ドラムMIDIのテンポBPM数値（例: 120, 140）またはテンポMIDI/解析元音声ファイルパス
+        tempo_file: (互換性用) マージするテンポMIDI/音声ファイルパス
         tempo_tolerance: テンポ解析時の揺らぎ平滑化許容幅（BPM、デフォルト: 0.8）
 
     Returns:
         生成されたドラムMIDIファイルの Path オブジェクト
     """
+    from midimaker.tempo import parse_tempo_input
+
     audio_file = Path(audio_path).resolve()
     if not audio_file.exists():
         raise FileNotFoundError(f"音声ファイルが見つかりません: {audio_file}")
@@ -84,12 +88,19 @@ def transcribe_drums(
     else:
         output_file = Path(output_path).resolve()
 
+    # テンポ指定の解決（tempo引数優先、未指定時はtempo_fileチェック）
+    raw_tempo = tempo if tempo is not None else tempo_file
+    parsed_bpm, parsed_file = parse_tempo_input(raw_tempo)
+    effective_tempo_source = parsed_file if parsed_file is not None else parsed_bpm
+
     print(f"🥁 [MIDImaker] ドラム音源を解析中: {audio_file.name}")
     print(f"   ├─ 入力モード: {'フルミックス（自動分離）' if input_is_mix else 'ドラムステム（パーツ分離＆転写）'}")
     if min_volume_db is not None:
         print(f"   ├─ ノイズゲート: {min_volume_db} dB 以下の微弱音を除外")
-    if tempo_file is not None:
-        print(f"   ├─ テンポ音源/MIDI: {Path(tempo_file).name} (完了後にマージ)")
+    if parsed_file is not None:
+        print(f"   ├─ テンポ音源/MIDI: {parsed_file.name} (完了後にマージ)")
+    elif parsed_bpm is not None:
+        print(f"   ├─ 指定テンポ: {parsed_bpm:.1f} BPM (完了後に適用)")
     print(f"   └─ 出力先: {output_file.name}")
 
     # ADTOF Plus の推論モジュールを遅延インポート
@@ -114,13 +125,13 @@ def transcribe_drums(
             min_volume_db=min_volume_db,
         )
 
-    # テンポ情報のマージ（テンポMIDIまたは音声ファイルが指定されている場合）
-    if tempo_file is not None and output_file.exists():
+    # テンポ情報のマージ/適用（テンポMIDI、音声ファイル、または数値BPMが指定されている場合）
+    if effective_tempo_source is not None and output_file.exists():
         from midimaker.tempo import merge_tempo_into_midi
 
         merge_tempo_into_midi(
             target_midi_path=output_file,
-            tempo_source=tempo_file,
+            tempo_source=effective_tempo_source,
             tolerance_bpm=tempo_tolerance,
         )
 

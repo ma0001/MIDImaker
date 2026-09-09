@@ -197,6 +197,9 @@ uv run midimaker bass "path/to/bass_stem.wav" -o "output.mid"
 # またはエイリアスコマンド
 uv run midimaker-bass "path/to/bass_stem.wav"
 
+# テンポBPMを指定する場合（例: 135 BPM）
+uv run midimaker bass "path/to/bass_stem.wav" -t 135
+
 # テンポ情報（テンポMIDIまたはフルミックス音源）をベースMIDIにマージする場合
 uv run midimaker bass "path/to/bass_stem.wav" -t "path/to/full_mix_tempo.mid"
 # またはフルミックス音源を直接指定して自動マージ（ドラムとタイミングが完全一致します）
@@ -215,8 +218,7 @@ uv run midimaker bass "path/to/bass_stem.wav" -t "path/to/full_mix.mp3"
 | `--max-freq` | `800.0` | 検出最高周波数 (Hz)。ベース帯域に絞り、不要な高域ノイズをカット |
 | `--min-volume-db` | `-45.0` | ノイズゲート音量閾値 (dB)。これ以下の微小音・休符・無音区間のノートを除外 |
 | `--no-monophonic` | オフ | 和音の重複をそのまま残す（デフォルトは単音ラインに自動クリーンアップ） |
-| `--tempo` | `120.0` | MIDIのデフォルトテンポ (BPM) |
-| `-t`, `--tempo-file` | なし | ベースMIDIにマージするテンポMIDIファイル (`.mid`) またはテンポ解析元の音声ファイル (`.mp3`, `.wav`) |
+| `-t`, `--tempo` | `120.0` | テンポ設定。数字（例: `135`）なら指定BPM、ファイルパス（`.mid`, `.mp3`, `.wav` 等）ならテンポ解析・マージ |
 | `--tempo-tolerance` | `0.8` | テンポ解析元の音声からテンポ抽出する際の揺らぎ平滑化許容幅 (BPM) |
 
 
@@ -233,6 +235,9 @@ midimaker drums "path/to/drums_stem.wav" -o "output.mid"
 
 # またはエイリアスコマンド
 midimaker-drums "path/to/drums_stem.wav"
+
+# テンポBPMを指定する場合（例: 130 BPM）
+midimaker drums "path/to/drums_stem.wav" -t 130
 
 # フルミックス楽曲から直接ドラム分離してMIDI化する場合
 midimaker drums "path/to/full_mix.mp3" --from-mix
@@ -251,7 +256,7 @@ midimaker drums "path/to/drums_stem.wav" -t "path/to/full_mix.mp3"
 | `--from-mix` | オフ | フルミックス楽曲からドラムを自動分離して処理（ドラムステム時は不要） |
 | `--min-volume-db` | `-45.0` | ノイズゲート音量閾値 (dB)。休符や無音区間のヒスノイズ誤発火を除外 |
 | `--threshold` | `-inf` | Onset検出感度閾値 |
-| `-t`, `--tempo-file` | なし | ドラムMIDIにマージするテンポMIDIファイル (`.mid`) またはテンポ解析元の音声ファイル (`.mp3`, `.wav`) |
+| `-t`, `--tempo` | なし | テンポ設定。数字（例: `135`）なら固定BPMを適用、ファイルパス（`.mid`, `.mp3`, `.wav` 等）ならテンポ解析・マージ |
 | `--tempo-tolerance` | `0.8` | テンポ解析元の音声からテンポ抽出する際の揺らぎ平滑化許容幅 (BPM) |
 
 > [!TIP]
