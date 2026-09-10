@@ -124,6 +124,13 @@ adtof-transcribe --audio_path samples/03\ 花と夢.mp3 --output_path samples/03
 uv add basic-pitch
 ```
 
+# Audio Separator
+## インストール
+
+```bash
+uv add "audio-separator[cpu]"
+```
+
 
 # ---------------- 参考
 # OMNIZART

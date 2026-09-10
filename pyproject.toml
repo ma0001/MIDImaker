@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.11"
 dependencies = [
     "adtof-plus-drum-transcription",
+    "audio-separator[cpu]>=0.47.0",
     "basic-pitch>=0.4.0",
     "essentia==2.1b6.dev1389",
     "onnxruntime>=1.29.0",
