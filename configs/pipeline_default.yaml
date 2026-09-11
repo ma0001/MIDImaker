@@ -1,0 +1,77 @@
+# =============================================================================
+# MIDImaker ステム分離パイプライン設定 (推奨デフォルト設定)
+#
+# フロー:
+# 1. 元音源からドラム特化モデル (kuielab_a_drums) でドラムを直接抽出
+# 2. 元音源からベース特化モデル (kuielab_a_bass) でベースを直接抽出
+# 3. 元音源から高精度モデル (bs-roformer-inst) で Vocals を抽出
+# 4. 元音源から Demucs v4 (htdemucs_ft) でドラム・ベース・ボーカルを除いた Other を抽出
+# 5. 分離された Vocals に対してのみ De-Echo / De-Reverb を適用し、
+#    完全ドライなボーカル (vocals_dry) を作成
+# =============================================================================
+
+# 出力フォーマット (WAV / FLAC / MP3 など。デフォルト: WAV)
+output_format: "WAV"
+
+# サンプリングレート
+sample_rate: 44100
+
+# 中間生成ファイル（作業ディレクトリ内の一時ファイル）を削除するか (true: 保持, false: 削除)
+keep_intermediates: false
+
+# 共通モデル定義ファイルのパス (省略時は configs/models.yaml を自動検索)
+models_config: "configs/models.yaml"
+
+# エイリアス定義
+aliases:
+  drums-kuielab: "kuielab_a_drums.onnx"
+  bass-kuielab: "kuielab_a_bass.onnx"
+  bs-roformer-inst: "model_bs_roformer_ep_317_sdr_12.9755.ckpt"
+  demucs-ft: "htdemucs_ft.yaml"
+  dereverb-echo: "dereverb-echo_mel_band_roformer_sdr_13.4843_v2.ckpt"
+
+steps:
+  # ---------------------------------------------------------------------------
+  # Step 1: ドラム特化モデルによるドラム抽出 (元音源から直接抽出)
+  # ---------------------------------------------------------------------------
+  - name: "drums"
+    model: "drums-kuielab"
+    input: "input"
+    target_stems: ["drums"]
+    output_name: "{basename}_drums"
+
+  # ---------------------------------------------------------------------------
+  # Step 2: ベース特化モデルによるベース抽出 (元音源から直接抽出)
+  # ---------------------------------------------------------------------------
+  - name: "bass"
+    model: "bass-kuielab"
+    input: "input"
+    target_stems: ["bass"]
+    output_name: "{basename}_bass"
+
+  # ---------------------------------------------------------------------------
+  # Step 3: 最高精度のボーカル抽出 (BS-Roformer)
+  # ---------------------------------------------------------------------------
+  - name: "vocal_sep"
+    model: "bs-roformer-inst"
+    input: "input"
+    target_stems: ["vocals"]
+    output_name: "{basename}_vocals"
+
+  # ---------------------------------------------------------------------------
+  # Step 4: ドラム・ベース・ボーカルを除いたその他（Other）の抽出 (Demucs v4)
+  # ---------------------------------------------------------------------------
+  - name: "other_sep"
+    model: "demucs-ft"
+    input: "input"
+    target_stems: ["other"]
+    output_name: "{basename}_other"
+
+  # ---------------------------------------------------------------------------
+  # Step 5: ボーカルのみに De-Echo / De-Reverb を適用（完全ドライボーカル化）
+  # ---------------------------------------------------------------------------
+  - name: "vocal_dereverb"
+    model: "dereverb-echo"
+    input: "vocal_sep.vocals"  # Step 3 で抽出されたボーカルを入力！
+    target_stems: ["dry"]
+    output_name: "{basename}_vocals_dry"

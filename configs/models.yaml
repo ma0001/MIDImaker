@@ -1,0 +1,88 @@
+# =============================================================================
+# MIDImaker 音源分離モデル定義 & エイリアスマッピング
+#
+# この設定ファイルで、モデルの別名（エイリアス）や詳細メタデータを一元管理します。
+# 新しいモデルを追加したい場合や、自分好みの短縮名を付けたい場合はここを編集してください。
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# おすすめモデル一覧（CLI の --list-models で表示されます）
+# -----------------------------------------------------------------------------
+models:
+  dereverb-echo:
+    filename: "dereverb-echo_mel_band_roformer_sdr_13.4843_v2.ckpt"
+    category: "MDXC / Roformer"
+    stems: ["dry", "no dry"]
+    description: "リバーブとエコーを同時に除去して完全ドライな音源を抽出（最高品質）"
+
+  dereverb:
+    filename: "dereverb_mel_band_roformer_anvuew_sdr_19.1729.ckpt"
+    category: "MDXC / Roformer"
+    stems: ["noreverb", "reverb"]
+    description: "リバーブのみを除去するMelBand Roformerモデル（SDR 19.17の超高精度）"
+
+  drums-kuielab:
+    filename: "kuielab_a_drums.onnx"
+    category: "MDX-Net"
+    stems: ["drums", "no drums"]
+    description: "ドラム抽出に特化したMDX-Netモデル（キレの良いドラムステムを抽出）"
+
+  bass-kuielab:
+    filename: "kuielab_a_bass.onnx"
+    category: "MDX-Net"
+    stems: ["bass", "no bass"]
+    description: "ベース抽出に特化したMDX-Netモデル（明瞭な低音域ラインを抽出）"
+
+  drumsep:
+    filename: "MDX23C-DrumSep-aufr33-jarredou.ckpt"
+    category: "MDXC"
+    stems: ["kick", "snare", "toms", "hh", "ride", "crash"]
+    description: "ドラムキットを6パーツ（Kick, Snare, Toms, HH, Ride, Crash）に高精度分解"
+
+  bs-roformer-inst:
+    filename: "model_bs_roformer_ep_317_sdr_12.9755.ckpt"
+    category: "Roformer"
+    stems: ["vocals", "instrumental"]
+    description: "ボーカルとインストゥルメンタルを高精度に分離する定番Roformerモデル"
+
+  demucs-ft:
+    filename: "htdemucs_ft.yaml"
+    category: "Demucs v4"
+    stems: ["vocals", "drums", "bass", "other"]
+    description: "Demucs v4ファインチューン版（全パート一括分離・バランス良好）"
+
+  demucs-6s:
+    filename: "htdemucs_6s.yaml"
+    category: "Demucs v4"
+    stems: ["vocals", "drums", "bass", "guitar", "piano", "other"]
+    description: "Demucs 6ステム版（ギター・ピアノも個別分離）"
+
+
+# -----------------------------------------------------------------------------
+# エイリアス（短縮名）マッピング
+# キー名がパイプライン設定の 'model' で使用できる別名になります。
+# -----------------------------------------------------------------------------
+aliases:
+  # De-Reverb / De-Echo
+  dereverb-echo: "dereverb-echo_mel_band_roformer_sdr_13.4843_v2.ckpt"
+  de-echo: "dereverb-echo_mel_band_roformer_sdr_13.4843_v2.ckpt"
+  dereverb: "dereverb_mel_band_roformer_anvuew_sdr_19.1729.ckpt"
+  de-reverb: "dereverb_mel_band_roformer_anvuew_sdr_19.1729.ckpt"
+
+  # ドラム特化
+  drums-kuielab: "kuielab_a_drums.onnx"
+  drums: "kuielab_a_drums.onnx"
+  drumsep: "MDX23C-DrumSep-aufr33-jarredou.ckpt"
+
+  # ベース特化
+  bass-kuielab: "kuielab_a_bass.onnx"
+  bass: "kuielab_a_bass.onnx"
+
+  # ボーカル / インスト分離
+  bs-roformer-inst: "model_bs_roformer_ep_317_sdr_12.9755.ckpt"
+  inst: "model_bs_roformer_ep_317_sdr_12.9755.ckpt"
+
+  # Demucs 一括分離
+  demucs-ft: "htdemucs_ft.yaml"
+  demucs: "htdemucs_ft.yaml"
+  demucs-6s: "htdemucs_6s.yaml"

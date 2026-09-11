@@ -190,6 +190,121 @@ uv add --workspace adtof_plus_drum_transcription
 
 ## MIDImaker CLI の使い方
 
+### 🎛️ 音源分離（ステム分離）パイプライン (audio-separator)
+
+`audio-separator` を活用し、各楽器（ドラム、ベース等）それぞれに最も適した特化モデルの適用や、De-Echo / De-Reverb（エコー・リバーブ除去）の前処理を組み合わせた多段パイプラインを実行します。
+出力はデフォルトで **高音質なWAVE（WAV）形式** になっています。
+
+```bash
+# 基本的な使い方（ドラム特化＋ベース特化モデルで WAV を出力）
+midimaker separate "path/to/song.mp3"
+
+# またはエイリアスコマンド
+midimaker-separate "path/to/song.mp3"
+
+# 設定ファイルを指定して高度なパイプラインを実行（De-Echo/De-Reverb → ドラム特化＆ベース特化）
+midimaker separate "path/to/song.mp3" -c "configs/pipeline_default.yaml" -o "./stems"
+
+# おすすめモデル・エイリアス一覧を表示
+midimaker separate --list-models
+
+# サポートされている全モデル一覧を表示
+midimaker separate --list-all
+```
+
+#### 主なオプション設定
+
+| オプション | デフォルト値 | 説明 |
+| :--- | :--- | :--- |
+| `-c`, `--config` | 省略（標準構成） | パイプライン設定ファイルパス (`.yaml`, `.toml`, `.json`) |
+| `-o`, `--output-dir` | 入力ファイルと同階層 | ステムWAVファイルの出力先ディレクトリ |
+| `--format` | `WAV` | 出力フォーマット (`WAV`, `FLAC`, `MP3`, `M4A`, `OGG`) |
+| `--model-dir` | `/tmp/audio-separator-models/` | モデルキャッシュ保存先ディレクトリ |
+| `--list-models` | - | おすすめモデルとエイリアス一覧を表示して終了 |
+| `--list-all` | - | 対応する全モデル一覧を表示して終了 |
+
+#### パイプライン設定ファイル (`pipeline.yaml`) の書き方
+
+設定ファイルを使うことで、任意のモデルを好きな順序で繋ぎ、前ステップの特定のステム（例: `dereverb.dry`）を次ステップの入力に渡すことができます。
+モデルエイリアスはプログラム内には固定されておらず、**`configs/models.yaml` またはパイプライン設定ファイルの `aliases:` セクション** で自由に管理・追加できます。
+
+```yaml
+# 出力フォーマット (デフォルト: WAV)
+output_format: "WAV"
+sample_rate: 44100
+keep_intermediates: false  # 中間作業ファイルを残すか (true/false)
+
+# 共通モデル定義ファイルの指定 (省略時は configs/models.yaml を自動参照)
+models_config: "configs/models.yaml"
+
+# パイプライン固有のエイリアス定義（追加・上書きも自由自在！）
+aliases:
+  drums-kuielab: "kuielab_a_drums.onnx"
+  bass-kuielab: "kuielab_a_bass.onnx"
+  bs-roformer-inst: "model_bs_roformer_ep_317_sdr_12.9755.ckpt"
+  dereverb-echo: "dereverb-echo_mel_band_roformer_sdr_13.4843_v2.ckpt"
+
+steps:
+  # Step 1: ドラム特化モデルでドラムを抽出 (元音源から直接)
+  - name: "drums"
+    model: "drums-kuielab"
+    input: "input"
+    target_stems: ["drums"]
+    output_name: "{basename}_drums"
+
+  # Step 2: ベース特化モデルでベースを抽出 (元音源から直接)
+  - name: "bass"
+    model: "bass-kuielab"
+    input: "input"
+    target_stems: ["bass"]
+    output_name: "{basename}_bass"
+
+  # Step 3: 最高精度のボーカル抽出 (BS-Roformer)
+  - name: "vocal_sep"
+    model: "bs-roformer-inst"
+    input: "input"
+    target_stems: ["vocals"]
+    output_name: "{basename}_vocals"
+
+  # Step 4: ドラム・ベース・ボーカルを除いたその他（Other）の抽出 (Demucs v4)
+  - name: "other_sep"
+    model: "demucs-ft"
+    input: "input"
+    target_stems: ["other"]
+    output_name: "{basename}_other"
+
+  # Step 5: ボーカルのみに De-Echo / De-Reverb を適用（完全ドライボーカル化）
+  - name: "vocal_dereverb"
+    model: "dereverb-echo"
+    input: "vocal_sep.vocals"  # Step 3 で抽出されたボーカルを入力！
+    target_stems: ["dry"]
+    output_name: "{basename}_vocals_dry"
+```
+
+##### 各ステップの `input`（入力音源）の指定方法
+
+パイプラインの各ステップで処理する入力音源（`input`）は、以下の4つの記法で柔軟にルーティングできます：
+
+| 指定パターン | 書式例 | 説明 |
+| :--- | :--- | :--- |
+| **元音声ファイル** | `input: "input"` | コマンドライン引数で指定された最初の元音声（MP3/WAV等）を入力にします（並列抽出に最適） |
+| **前ステップの特定ステム** | `input: "{step_name}.{stem_name}"`<br>（例: `"dereverb.dry"`, `"vocal_sep.instrumental"`） | 前のステップ名（`name`）と、モデルが分離したステム名（`dry`, `instrumental`, `drums` 等）をドット（`.`）で繋いでピンポイントにパイプします（★一番よく使う記法） |
+| **前ステップの出力全体** | `input: "{step_name}"`<br>（例: `"dereverb"`） | ステム名を省略してステップ名のみを指定した場合、そのステップで出力された音声が自動的に渡されます |
+| **外部固定ファイル** | `input: "path/to/audio.wav"` | 実在するローカルの音声ファイルパスを直接指定して入力にします |
+
+#### 🌟 おすすめモデル一覧 (`configs/models.yaml` で定義)
+
+エイリアスや説明などのメタデータは `configs/models.yaml` で一元管理されています。
+
+- **`dereverb-echo`** (`dereverb-echo_mel_band_roformer_sdr_13.4843_v2.ckpt`): リバーブとエコーを同時に除去して完全ドライな音源を抽出（最高品質）
+- **`dereverb`** (`dereverb_mel_band_roformer_anvuew_sdr_19.1729.ckpt`): リバーブのみを高精度除去
+- **`drums-kuielab`** (`kuielab_a_drums.onnx`): ドラム抽出特化モデル（MDX-Net）
+- **`bass-kuielab`** (`kuielab_a_bass.onnx`): ベース抽出特化モデル（MDX-Net）
+- **`drumsep`** (`MDX23C-DrumSep-aufr33-jarredou.ckpt`): ドラムを6パーツ（Kick, Snare, Toms, HH, Ride, Crash）に分解
+- **`bs-roformer-inst`** (`model_bs_roformer_ep_317_sdr_12.9755.ckpt`): ボーカルとインストを分離する超高精度モデル
+- **`demucs-ft`** (`htdemucs_ft.yaml`): 定番のDemucs v4 4-stems一括分離
+
+
 ### 🎸 ベース音源からクリーンなMIDIを生成 (Spotify Basic Pitch)
 
 ステム分離されたベース音源（WAV, MP3等）から、低音域最適化＆モノフォニック（単音）整形を行ってMIDIを作成します。

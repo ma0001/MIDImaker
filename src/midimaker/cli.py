@@ -178,6 +178,58 @@ def build_parser() -> argparse.ArgumentParser:
         help="テンポの微小な揺らぎ（ジッター）とみなして平均化する許容変動幅 BPM (デフォルト: 0.8BPM。0以下の場合は平滑化無効)",
     )
 
+    # ----------------------------------------------------
+    # サブコマンド: separate (ステム音源分離パイプライン)
+    # ----------------------------------------------------
+    separate_parser = subparsers.add_parser(
+        "separate",
+        help="audio-separator を利用した高精度ステム分離（楽器特化モデル・De-Echo/De-Reverb・WAV出力対応）",
+        description="各楽器（ドラム、ベース等）の特化モデルやエコー・リバーブ除去を組み合わせたパイプラインを実行し、高音質なWAVE形式でステムを出力します。",
+    )
+
+    separate_parser.add_argument(
+        "input",
+        nargs="?",
+        type=str,
+        default=None,
+        help="入力音声ファイルのパス (MP3, WAV, FLAC, M4A等)",
+    )
+    separate_parser.add_argument(
+        "-c", "--config",
+        type=str,
+        default=None,
+        help="パイプライン設定ファイルパス (.yaml, .toml, .json)。省略時はドラム＆ベース特化モデルの標準構成",
+    )
+    separate_parser.add_argument(
+        "-o", "--output-dir",
+        type=str,
+        default=None,
+        help="ステム音声の出力先ディレクトリ (省略時は入力ファイルと同じディレクトリ)",
+    )
+    separate_parser.add_argument(
+        "--format",
+        type=str,
+        default="WAV",
+        choices=["WAV", "FLAC", "MP3", "M4A", "OGG"],
+        help="出力音声フォーマット (デフォルト: WAV)",
+    )
+    separate_parser.add_argument(
+        "--model-dir",
+        type=str,
+        default=None,
+        help="モデルキャッシュ保存先ディレクトリ (デフォルト: /tmp/audio-separator-models/)",
+    )
+    separate_parser.add_argument(
+        "--list-models",
+        action="store_true",
+        help="おすすめモデルとエイリアス一覧を表示して終了",
+    )
+    separate_parser.add_argument(
+        "--list-all",
+        action="store_true",
+        help="audio-separator が対応する全モデル一覧を表示して終了",
+    )
+
     return parser
 
 
@@ -246,6 +298,42 @@ def main() -> None:
             print(f"❌ エラーが発生しました: {e}", file=sys.stderr)
             sys.exit(1)
 
+    elif args.command == "separate":
+        from midimaker.separator import (
+            StemPipelineRunner,
+            load_pipeline_config,
+            print_all_supported_models,
+            print_recommended_models,
+        )
+
+        # モデル一覧の表示オプション処理
+        if args.list_models:
+            print_recommended_models()
+            sys.exit(0)
+
+        if args.list_all:
+            print_all_supported_models()
+            sys.exit(0)
+
+        if not args.input:
+            print("❌ エラー: 入力音声ファイルパスを指定してください。", file=sys.stderr)
+            print("   例: midimaker separate input.mp3 -c configs/pipeline_default.yaml", file=sys.stderr)
+            print("   (モデル一覧を見るには: midimaker separate --list-models)", file=sys.stderr)
+            sys.exit(1)
+
+        try:
+            config = load_pipeline_config(args.config)
+            runner = StemPipelineRunner(
+                config=config,
+                output_dir=args.output_dir,
+                output_format=args.format,
+                model_file_dir=args.model_dir,
+            )
+            runner.run(args.input)
+        except Exception as e:
+            print(f"❌ エラーが発生しました: {e}", file=sys.stderr)
+            sys.exit(1)
+
     else:
         parser.print_help()
 
@@ -268,5 +356,12 @@ def tempo_cli() -> None:
     """midimaker-tempo コマンドとして直接テンポMIDI生成を実行するエントリーポイント"""
     if len(sys.argv) > 1 and sys.argv[1] != "tempo":
         sys.argv.insert(1, "tempo")
+    main()
+
+
+def separate_cli() -> None:
+    """midimaker-separate コマンドとして直接ステム分離を実行するエントリーポイント"""
+    if len(sys.argv) > 1 and sys.argv[1] != "separate":
+        sys.argv.insert(1, "separate")
     main()
 

@@ -1,0 +1,34 @@
+# =============================================================================
+# MIDImaker ステム分離パイプライン設定 (高速・特化モデル直接抽出)
+#
+# フロー:
+# 元音源から直接、ドラム特化モデルとベース特化モデルをそれぞれ実行して
+# 高速にWAVファイルを出力します。
+# =============================================================================
+
+output_format: "WAV"
+sample_rate: 44100
+keep_intermediates: false
+
+# 共通モデル定義ファイルのパス (省略時は configs/models.yaml を自動検索)
+models_config: "configs/models.yaml"
+
+# エイリアス定義
+aliases:
+  drums-kuielab: "kuielab_a_drums.onnx"
+  bass-kuielab: "kuielab_a_bass.onnx"
+
+steps:
+  # ドラム特化モデル
+  - name: "drums"
+    model: "drums-kuielab"
+    input: "input"
+    target_stems: ["drums"]
+    output_name: "{basename}_drums"
+
+  # ベース特化モデル
+  - name: "bass"
+    model: "bass-kuielab"
+    input: "input"
+    target_stems: ["bass"]
+    output_name: "{basename}_bass"

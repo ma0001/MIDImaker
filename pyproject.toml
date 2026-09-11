@@ -21,6 +21,7 @@ midimaker = "midimaker:main"
 midimaker-bass = "midimaker:bass_cli"
 midimaker-drums = "midimaker:drums_cli"
 midimaker-tempo = "midimaker:tempo_cli"
+midimaker-separate = "midimaker:separate_cli"
 
 
 [build-system]
