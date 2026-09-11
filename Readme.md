@@ -217,7 +217,8 @@ midimaker separate --list-all
 | オプション | デフォルト値 | 説明 |
 | :--- | :--- | :--- |
 | `-c`, `--config` | 省略（標準構成） | パイプライン設定ファイルパス (`.yaml`, `.toml`, `.json`) |
-| `-o`, `--output-dir` | 入力ファイルと同階層 | ステムWAVファイルの出力先ディレクトリ |
+| `-o`, `--output-dir` | 入力ファイルと同階層 | ステムWAVファイルおよびMIDIファイルの出力先ディレクトリ |
+| `-t`, `--tempo` | `input` (自動解析) | MIDIのテンポBPM数値（例: `120`）または外部テンポMIDI/音声ファイルパス（設定ファイル値を上書き） |
 | `--format` | `WAV` | 出力フォーマット (`WAV`, `FLAC`, `MP3`, `M4A`, `OGG`) |
 | `--model-dir` | `/tmp/audio-separator-models/` | モデルキャッシュ保存先ディレクトリ |
 | `--list-models` | - | おすすめモデルとエイリアス一覧を表示して終了 |
@@ -237,23 +238,29 @@ keep_intermediates: false  # 中間作業ファイルを残すか (true/false)
 # 共通モデル定義ファイルの指定 (省略時は configs/models.yaml を自動参照)
 models_config: "configs/models.yaml"
 
+# テンポ同期のデフォルト設定 ("input" で元音声から自動解析、またはBPM数値 / 外部テンポMIDIパス)
+tempo: "input"
+
 # パイプライン固有のエイリアス定義（追加・上書きも自由自在！）
 aliases:
   drums-kuielab: "kuielab_a_drums.onnx"
   bass-kuielab: "kuielab_a_bass.onnx"
   bs-roformer-inst: "model_bs_roformer_ep_317_sdr_12.9755.ckpt"
+  demucs-ft: "htdemucs_ft.yaml"
   dereverb-echo: "dereverb-echo_mel_band_roformer_sdr_13.4843_v2.ckpt"
 
 steps:
-  # Step 1: ドラム特化モデルでドラムを抽出 (元音源から直接)
+  # Step 1: ドラム特化モデルでドラムWAVを抽出 (元音源から直接)
   - name: "drums"
+    type: "separate"
     model: "drums-kuielab"
     input: "input"
     target_stems: ["drums"]
     output_name: "{basename}_drums"
 
-  # Step 2: ベース特化モデルでベースを抽出 (元音源から直接)
+  # Step 2: ベース特化モデルでベースWAVを抽出 (元音源から直接)
   - name: "bass"
+    type: "separate"
     model: "bass-kuielab"
     input: "input"
     target_stems: ["bass"]
@@ -261,6 +268,7 @@ steps:
 
   # Step 3: 最高精度のボーカル抽出 (BS-Roformer)
   - name: "vocal_sep"
+    type: "separate"
     model: "bs-roformer-inst"
     input: "input"
     target_stems: ["vocals"]
@@ -268,6 +276,7 @@ steps:
 
   # Step 4: ドラム・ベース・ボーカルを除いたその他（Other）の抽出 (Demucs v4)
   - name: "other_sep"
+    type: "separate"
     model: "demucs-ft"
     input: "input"
     target_stems: ["other"]
@@ -275,10 +284,31 @@ steps:
 
   # Step 5: ボーカルのみに De-Echo / De-Reverb を適用（完全ドライボーカル化）
   - name: "vocal_dereverb"
+    type: "separate"
     model: "dereverb-echo"
     input: "vocal_sep.vocals"  # Step 3 で抽出されたボーカルを入力！
     target_stems: ["dry"]
     output_name: "{basename}_vocals_dry"
+
+  # Step 6: テンポ解析＆テンポトラックMIDI生成 (Essentia)
+  - name: "tempo_track"
+    type: "tempo_midi"
+    input: "input"             # 元音源からテンポマップを解析してテンポMIDIを出力
+    output_name: "{basename}_tempo.mid"
+
+  # Step 7: ドラムWAVからドラムMIDIを自動生成 (Step 6 のテンポMIDIを同期元に入力！)
+  - name: "drums_midi"
+    type: "drums_midi"
+    input: "drums.drums"       # Step 1 で分離されたドラムWAVを入力！
+    output_name: "{basename}_drums.mid"
+    tempo: "tempo_track"       # 👈 Step 6 のテンポMIDIファイルを入力！
+
+  # Step 8: ベースWAVからベースMIDIを自動生成 (Step 6 のテンポMIDIを同期元に入力！)
+  - name: "bass_midi"
+    type: "bass_midi"
+    input: "bass.bass"         # Step 2 で分離されたベースWAVを入力！
+    output_name: "{basename}_bass.mid"
+    tempo: "tempo_track"       # 👈 Step 6 のテンポMIDIファイルを入力！
 ```
 
 ##### 各ステップの `input`（入力音源）の指定方法
@@ -288,9 +318,21 @@ steps:
 | 指定パターン | 書式例 | 説明 |
 | :--- | :--- | :--- |
 | **元音声ファイル** | `input: "input"` | コマンドライン引数で指定された最初の元音声（MP3/WAV等）を入力にします（並列抽出に最適） |
-| **前ステップの特定ステム** | `input: "{step_name}.{stem_name}"`<br>（例: `"dereverb.dry"`, `"vocal_sep.instrumental"`） | 前のステップ名（`name`）と、モデルが分離したステム名（`dry`, `instrumental`, `drums` 等）をドット（`.`）で繋いでピンポイントにパイプします（★一番よく使う記法） |
-| **前ステップの出力全体** | `input: "{step_name}"`<br>（例: `"dereverb"`） | ステム名を省略してステップ名のみを指定した場合、そのステップで出力された音声が自動的に渡されます |
+| **前ステップの特定ステム** | `input: "{step_name}.{stem_name}"`<br>（例: `"dereverb.dry"`, `"drums.drums"`） | 前のステップ名（`name`）と、モデルが分離したステム名（`dry`, `drums` 等）をドット（`.`）で繋いでピンポイントにパイプします（★一番よく使う記法） |
+| **前ステップの出力全体** | `input: "{step_name}"`<br>（例: `"drums"`） | ステム名を省略してステップ名のみを指定した場合、そのステップで出力された音声が自動的に渡されます |
 | **外部固定ファイル** | `input: "path/to/audio.wav"` | 実在するローカルの音声ファイルパスを直接指定して入力にします |
+
+##### テンポ同期（`tempo`）の指定方法
+
+MIDI生成ステップ（`drums_midi`, `bass_midi`）やパイプライン全体（トップレベル）で、以下のテンポ指定が可能です：
+
+| 指定パターン | 書式例 | 説明 |
+| :--- | :--- | :--- |
+| **元音声から自動解析** | `tempo: "input"` | 元の楽曲（フルミックス）から Essentia でテンポマップ（可変テンポ・ビート）を高精度に自動解析してMIDIに埋め込みます（★推奨・完全同期！） |
+| **固定BPM** | `tempo: 128`<br>`tempo: 135.5` | 指定した固定BPMテンポをMIDIに設定します |
+| **外部テンポMIDI** | `tempo: "path/to/tempo.mid"` | DAW等で作成したテンポMIDIファイル（Tempo Track）のテンポ情報をそのままマージします |
+| **外部音声ファイル** | `tempo: "path/to/song.mp3"` | 外部音声ファイルからテンポ解析してマージします |
+| **前ステップのテンポ出力** | `tempo: "tempo_step"` | パイプライン内のテンポ生成ステップ（`tempo_midi`）の出力を参照します |
 
 #### 🌟 おすすめモデル一覧 (`configs/models.yaml` で定義)
 

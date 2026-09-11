@@ -1,13 +1,15 @@
 # =============================================================================
-# MIDImaker ステム分離パイプライン設定 (推奨デフォルト設定)
+# MIDImaker ステム分離 ＆ MIDI自動生成パイプライン (推奨デフォルト設定)
 #
 # フロー:
-# 1. 元音源からドラム特化モデル (kuielab_a_drums) でドラムを直接抽出
-# 2. 元音源からベース特化モデル (kuielab_a_bass) でベースを直接抽出
-# 3. 元音源から高精度モデル (bs-roformer-inst) で Vocals を抽出
-# 4. 元音源から Demucs v4 (htdemucs_ft) でドラム・ベース・ボーカルを除いた Other を抽出
-# 5. 分離された Vocals に対してのみ De-Echo / De-Reverb を適用し、
-#    完全ドライなボーカル (vocals_dry) を作成
+# 1. 元音源からドラム特化モデル (kuielab_a_drums) でドラムWAVを直接抽出
+# 2. 元音源からベース特化モデル (kuielab_a_bass) でベースWAVを直接抽出
+# 3. 元音源から高精度モデル (bs-roformer-inst) で Vocals WAV を抽出
+# 4. 元音源から Demucs v4 (htdemucs_ft) でドラム・ベース・ボーカルを除いた Other WAV を抽出
+# 5. 分離された Vocals に対して De-Echo / De-Reverb を適用し、ドライボーカル (vocals_dry) を作成
+# 6. 元音源からテンポマップ解析を行い、独立したテンポMIDI (_tempo.mid) を出力
+# 7. Step 6 のテンポMIDIを同期元にして、ドラムWAVからドラムMIDI (_drums.mid) を生成
+# 8. Step 6 のテンポMIDIを同期元にして、ベースWAVからベースMIDI (_bass.mid) を生成
 # =============================================================================
 
 # 出力フォーマット (WAV / FLAC / MP3 など。デフォルト: WAV)
@@ -35,6 +37,7 @@ steps:
   # Step 1: ドラム特化モデルによるドラム抽出 (元音源から直接抽出)
   # ---------------------------------------------------------------------------
   - name: "drums"
+    type: "separate"
     model: "drums-kuielab"
     input: "input"
     target_stems: ["drums"]
@@ -44,6 +47,7 @@ steps:
   # Step 2: ベース特化モデルによるベース抽出 (元音源から直接抽出)
   # ---------------------------------------------------------------------------
   - name: "bass"
+    type: "separate"
     model: "bass-kuielab"
     input: "input"
     target_stems: ["bass"]
@@ -53,6 +57,7 @@ steps:
   # Step 3: 最高精度のボーカル抽出 (BS-Roformer)
   # ---------------------------------------------------------------------------
   - name: "vocal_sep"
+    type: "separate"
     model: "bs-roformer-inst"
     input: "input"
     target_stems: ["vocals"]
@@ -62,6 +67,7 @@ steps:
   # Step 4: ドラム・ベース・ボーカルを除いたその他（Other）の抽出 (Demucs v4)
   # ---------------------------------------------------------------------------
   - name: "other_sep"
+    type: "separate"
     model: "demucs-ft"
     input: "input"
     target_stems: ["other"]
@@ -71,7 +77,34 @@ steps:
   # Step 5: ボーカルのみに De-Echo / De-Reverb を適用（完全ドライボーカル化）
   # ---------------------------------------------------------------------------
   - name: "vocal_dereverb"
+    type: "separate"
     model: "dereverb-echo"
     input: "vocal_sep.vocals"  # Step 3 で抽出されたボーカルを入力！
     target_stems: ["dry"]
     output_name: "{basename}_vocals_dry"
+
+  # ---------------------------------------------------------------------------
+  # Step 6: テンポ解析＆テンポトラックMIDI生成 (Essentia)
+  # ---------------------------------------------------------------------------
+  - name: "tempo_track"
+    type: "tempo_midi"
+    input: "input"             # 元音源から高精度にビート・テンポマップを解析
+    output_name: "{basename}_tempo.mid"
+
+  # ---------------------------------------------------------------------------
+  # Step 7: ドラムWAVからドラムMIDIを生成 (Step 6 のテンポファイルを同期元に入力！)
+  # ---------------------------------------------------------------------------
+  - name: "drums_midi"
+    type: "drums_midi"
+    input: "drums.drums"       # Step 1 で分離されたドラムWAVを入力！
+    output_name: "{basename}_drums.mid"
+    tempo: "tempo_track"       # 👈 Step 6 で出力されたテンポMIDIファイルを指定！
+
+  # ---------------------------------------------------------------------------
+  # Step 8: ベースWAVからベースMIDIを生成 (Step 6 のテンポファイルを同期元に入力！)
+  # ---------------------------------------------------------------------------
+  - name: "bass_midi"
+    type: "bass_midi"
+    input: "bass.bass"         # Step 2 で分離されたベースWAVを入力！
+    output_name: "{basename}_bass.mid"
+    tempo: "tempo_track"       # 👈 Step 6 で出力されたテンポMIDIファイルを指定！

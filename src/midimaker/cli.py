@@ -220,6 +220,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="モデルキャッシュ保存先ディレクトリ (デフォルト: /tmp/audio-separator-models/)",
     )
     separate_parser.add_argument(
+        "-t", "--tempo",
+        type=str,
+        default=None,
+        help="MIDIに設定するテンポBPM数値（例: 120, 140）またはマージするテンポMIDI/解析元音声ファイルパス ('input'なら元音声から自動解析)",
+    )
+    separate_parser.add_argument(
         "--list-models",
         action="store_true",
         help="おすすめモデルとエイリアス一覧を表示して終了",
@@ -328,6 +334,7 @@ def main() -> None:
                 output_dir=args.output_dir,
                 output_format=args.format,
                 model_file_dir=args.model_dir,
+                tempo=args.tempo,
             )
             runner.run(args.input)
         except Exception as e:

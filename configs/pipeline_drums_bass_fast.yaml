@@ -1,9 +1,12 @@
 # =============================================================================
-# MIDImaker ステム分離パイプライン設定 (高速・特化モデル直接抽出)
+# MIDImaker ステム分離 ＆ MIDI自動生成パイプライン (高速構成)
 #
 # フロー:
-# 元音源から直接、ドラム特化モデルとベース特化モデルをそれぞれ実行して
-# 高速にWAVファイルを出力します。
+# 1. 元音源からドラム特化モデル (kuielab_a_drums) でドラムWAVを直接抽出
+# 2. 元音源からベース特化モデル (kuielab_a_bass) でベースWAVを直接抽出
+# 3. 元音源からテンポMIDI (_tempo.mid) を出力
+# 4. Step 3 のテンポMIDIを同期元にして、ドラムWAVからドラムMIDI (_drums.mid) を生成
+# 5. Step 3 のテンポMIDIを同期元にして、ベースWAVからベースMIDI (_bass.mid) を生成
 # =============================================================================
 
 output_format: "WAV"
@@ -19,16 +22,38 @@ aliases:
   bass-kuielab: "kuielab_a_bass.onnx"
 
 steps:
-  # ドラム特化モデル
+  # ドラム特化モデル (WAV抽出)
   - name: "drums"
+    type: "separate"
     model: "drums-kuielab"
     input: "input"
     target_stems: ["drums"]
     output_name: "{basename}_drums"
 
-  # ベース特化モデル
+  # ベース特化モデル (WAV抽出)
   - name: "bass"
+    type: "separate"
     model: "bass-kuielab"
     input: "input"
     target_stems: ["bass"]
     output_name: "{basename}_bass"
+
+  # テンポMIDI生成
+  - name: "tempo_track"
+    type: "tempo_midi"
+    input: "input"
+    output_name: "{basename}_tempo.mid"
+
+  # ドラムMIDI生成 (tempo_track のMIDIを入力)
+  - name: "drums_midi"
+    type: "drums_midi"
+    input: "drums.drums"
+    output_name: "{basename}_drums.mid"
+    tempo: "tempo_track"
+
+  # ベースMIDI生成 (tempo_track のMIDIを入力)
+  - name: "bass_midi"
+    type: "bass_midi"
+    input: "bass.bass"
+    output_name: "{basename}_bass.mid"
+    tempo: "tempo_track"
