@@ -5,13 +5,12 @@
 # 1. 元音源からドラム特化モデル (kuielab_a_drums) でドラムWAVを直接抽出
 # 2. 元音源からベース特化モデル (kuielab_a_bass) でベースWAVを直接抽出
 # 3. 元音源から高精度モデル (bs-roformer-inst) で Vocals WAV を抽出
-# 4. 元音源から Demucs 6s (htdemucs_6s) でピアノ (piano) WAV を抽出
-# 5. 元音源から Demucs v4 (htdemucs_ft) でドラム・ベース・ボーカルを除いた Other WAV を抽出
-# 6. 分離された Vocals に対して De-Echo / De-Reverb を適用し、ドライボーカル (vocals_dry) を作成
-# 7. 元音源からテンポマップ解析を行い、独立したテンポMIDI (_tempo.mid) を出力
-# 8. Step 7 のテンポMIDIを同期元にして、ドラムWAVからドラムMIDI (_drums.mid) を生成
-# 9. Step 7 のテンポMIDIを同期元にして、ベースWAVからベースMIDI (_bass.mid) を生成
-# 10. Step 7 のテンポMIDIを同期元にして、ピアノWAVからペダル付きピアノMIDI (_piano.mid) を生成
+# 4. 元音源から Demucs 6s (htdemucs_6s) でピアノ・ギター・その他 (piano, guitar, other) WAV を一括抽出
+# 5. 分離された Vocals に対して De-Echo / De-Reverb を適用し、ドライボーカル (vocals_dry) を作成
+# 6. 元音源からテンポマップ解析を行い、独立したテンポMIDI (_tempo.mid) を出力
+# 7. Step 6 のテンポMIDIを同期元にして、ドラムWAVからドラムMIDI (_drums.mid) を生成
+# 8. Step 6 のテンポMIDIを同期元にして、ベースWAVからベースMIDI (_bass.mid) を生成
+# 9. Step 6 のテンポMIDIを同期元にして、ピアノWAVからペダル付きピアノMIDI (_piano.mid) を生成
 # =============================================================================
 
 # 出力フォーマット (WAV / FLAC / MP3 など。デフォルト: WAV)
@@ -31,7 +30,6 @@ aliases:
   drums-kuielab: "kuielab_a_drums.onnx"
   bass-kuielab: "kuielab_a_bass.onnx"
   bs-roformer-inst: "model_bs_roformer_ep_317_sdr_12.9755.ckpt"
-  demucs-ft: "htdemucs_ft.yaml"
   demucs-6s: "htdemucs_6s.yaml"
   dereverb-echo: "dereverb-echo_mel_band_roformer_sdr_13.4843_v2.ckpt"
 
@@ -67,27 +65,19 @@ steps:
     output_name: "{basename}_vocals"
 
   # ---------------------------------------------------------------------------
-  # Step 4: ピアノ抽出 (Demucs 6s)
+  # Step 4: ピアノ・ギター・その他抽出 (Demucs 6s)
+  # ※ 4ステム版(demucs-ft)の other にはピアノやギターが含まれて重複するため、
+  #    6ステム版(demucs-6s)から piano, guitar, other を一括抽出して重複を防ぎます。
   # ---------------------------------------------------------------------------
-  - name: "piano"
+  - name: "demucs_6s"
     type: "separate"
     model: "demucs-6s"
     input: "input"
-    target_stems: ["piano"]
-    output_name: "{basename}_piano"
+    target_stems: ["piano", "guitar", "other"]
+    output_name: "{basename}_{stem}"
 
   # ---------------------------------------------------------------------------
-  # Step 5: ドラム・ベース・ボーカルを除いたその他（Other）の抽出 (Demucs v4)
-  # ---------------------------------------------------------------------------
-  - name: "other_sep"
-    type: "separate"
-    model: "demucs-ft"
-    input: "input"
-    target_stems: ["other"]
-    output_name: "{basename}_other"
-
-  # ---------------------------------------------------------------------------
-  # Step 6: ボーカルのみに De-Echo / De-Reverb を適用（完全ドライボーカル化）
+  # Step 5: ボーカルのみに De-Echo / De-Reverb を適用（完全ドライボーカル化）
   # ---------------------------------------------------------------------------
   - name: "vocal_dereverb"
     type: "separate"
@@ -97,7 +87,7 @@ steps:
     output_name: "{basename}_vocals_dry"
 
   # ---------------------------------------------------------------------------
-  # Step 7: テンポ解析＆テンポトラックMIDI生成 (Essentia)
+  # Step 6: テンポ解析＆テンポトラックMIDI生成 (Essentia)
   # ---------------------------------------------------------------------------
   - name: "tempo_track"
     type: "tempo_midi"
@@ -105,28 +95,28 @@ steps:
     output_name: "{basename}_tempo.mid"
 
   # ---------------------------------------------------------------------------
-  # Step 8: ドラムWAVからドラムMIDIを生成 (Step 7 のテンポファイルを同期元に入力！)
+  # Step 7: ドラムWAVからドラムMIDIを生成 (Step 6 のテンポファイルを同期元に入力！)
   # ---------------------------------------------------------------------------
   - name: "drums_midi"
     type: "drums_midi"
     input: "drums.drums"       # Step 1 で分離されたドラムWAVを入力！
     output_name: "{basename}_drums.mid"
-    tempo: "tempo_track"       # 👈 Step 7 で出力されたテンポMIDIファイルを指定！
+    tempo: "tempo_track"       # 👈 Step 6 で出力されたテンポMIDIファイルを指定！
 
   # ---------------------------------------------------------------------------
-  # Step 9: ベースWAVからベースMIDIを生成 (Step 7 のテンポファイルを同期元に入力！)
+  # Step 8: ベースWAVからベースMIDIを生成 (Step 6 のテンポファイルを同期元に入力！)
   # ---------------------------------------------------------------------------
   - name: "bass_midi"
     type: "bass_midi"
     input: "bass.bass"         # Step 2 で分離されたベースWAVを入力！
     output_name: "{basename}_bass.mid"
-    tempo: "tempo_track"       # 👈 Step 7 で出力されたテンポMIDIファイルを指定！
+    tempo: "tempo_track"       # 👈 Step 6 で出力されたテンポMIDIファイルを指定！
 
   # ---------------------------------------------------------------------------
-  # Step 10: ピアノWAVからピアノMIDIを生成 (Step 7 のテンポファイルを同期元に入力！)
+  # Step 9: ピアノWAVからピアノMIDIを生成 (Step 6 のテンポファイルを同期元に入力！)
   # ---------------------------------------------------------------------------
   - name: "piano_midi"
     type: "piano_midi"
-    input: "piano.piano"       # Step 4 で分離されたピアノWAVを入力！
+    input: "demucs_6s.piano"   # Step 4 で分離されたピアノWAVを入力！
     output_name: "{basename}_piano.mid"
-    tempo: "tempo_track"       # 👈 Step 7 で出力されたテンポMIDIファイルを指定！
+    tempo: "tempo_track"       # 👈 Step 6 で出力されたテンポMIDIファイルを指定！
