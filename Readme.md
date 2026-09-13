@@ -18,6 +18,7 @@
   - 単音（モノフォニック）整形および音量閾値によるフィルタリングを適用したMIDIを出力。
 - **ピアノMIDI生成 (`midimaker piano`)**
   - ByteDance の `piano_transcription_inference` を用いて和音（ポリフォニック）、打鍵ベロシティ、およびサステインペダル（CC64）を高精度に検出・MIDI出力。
+  - エコーや残響の跳ね返りによる同一キーのマシンガン連打を自動統合・除去する「デバウンス（連打抑制）フィルター」を搭載。
   - テンポ解析モジュールと連動し、DAWのグリッドに沿った演奏情報として出力。
 - **テンポ解析・テンポトラックMIDI生成 (`midimaker tempo`)**
   - Essentia を用いてテンポ（BPM）およびビート位置を解析し、テンポ情報を含むMIDIファイル（Conductor Track）を出力。
@@ -216,6 +217,9 @@ steps:
     input: "demucs_6s.piano"   # Step 4 で分離されたピアノWAVを入力！
     output_name: "{basename}_piano.mid"
     tempo: "tempo_track"       # 👈 Step 6 のテンポMIDIファイルを入力！
+    onset_threshold: 0.35      # アタック感度 (0.35でエコーの微弱な立ち上がりをスルー)
+    min_volume_db: -40.0       # ノイズゲート閾値 (微弱な残響・ゴーストノートを除外)
+    debounce_ms: 120           # 連打抑制フィルター (120ms以内のエコー跳ね返り重複ノートを自動タイマージ)
 ```
 
 ##### 各ステップの `input`（入力音源）の指定方法
@@ -340,6 +344,8 @@ midimaker drums "path/to/drums_stem.wav" -t "path/to/full_mix.mp3"
 
 ByteDance の最先端ピアノ採譜モデル `piano_transcription_inference` をバックエンドに採用し、ソロピアノやバンド内のピアノパート（`demucs-6s` 等で分離したピアノステム）から、和音（ポリフォニック）・ベロシティ・**サステインペダル（ダンパーペダル / CC64）**を含む高精度なMIDIファイルを生成します。
 
+さらに、原曲のリバーブ・エコーやステム分離特有の揺らぎによって発生しやすい**同一キーのマシンガン連打（ゴーストノート）を自動防止する「デバウンスフィルター」**を内蔵。人間が物理的に弾けない超短時間での同一音連続発音や、残響減衰中の跳ね返り音を直前のノートに自動でタイ結合（マージ）します。
+
 ```bash
 # 基本的な使い方 (ピアノ音源から MIDI を出力)
 midimaker piano "path/to/piano.wav"
@@ -349,6 +355,9 @@ midimaker-piano "path/to/piano.wav"
 
 # テンポ同期（元楽曲のビートマップに自動同期）
 midimaker piano "stems/piano.wav" -t "song.mp3"
+
+# エコーや残響が強く連打が気になる場合の微調整（デバウンス間隔拡大＆アタック感度アップ）
+midimaker piano "stems/piano.wav" --debounce-ms 150 --onset-threshold 0.35
 
 # 出力先を指定する場合
 midimaker piano "piano.wav" -o "output_piano.mid"
