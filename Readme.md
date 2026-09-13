@@ -1,192 +1,88 @@
-# 環境構築
+# MIDImaker
 
-## python
+**MIDImaker** は、楽曲などの音声ファイル（MP3, WAV等）から、音源分離による各楽器ステム（WAV）の出力、およびドラム・ベース・テンポ情報のMIDIファイルを生成するためのCLIツールです。
 
-uv ＋ direnv を使ってディレクトリ移動時の自動切り替えと高速なパッケージ管理を行う
-ただし、uvではanacondaの環境構築が難しいのでpyenvの使用も併用する
+音声入力から「テンポ・ビート解析」「音源分離」「ドラムおよびベースのMIDI抽出」を実行し、DAW（Logic Pro、Cubase、Studio One、GarageBand等）で利用可能なファイルを出力します。
 
-併用時の注意点
-- Conda 環境下で uv add や uv venv を実行しない: 依存関係の競合を防ぐため、pyenv local で Anaconda を選んだディレクトリでは conda コマンドで管理し、uv は使用しない運用にしてください。
-- Python 実体の二重管理: pyenv install で入れた Python と、uv python install で入れた Python は別々の領域に保存されます。ディスク容量を過度に圧迫することはありませんが、別管理になる点は留意してください。
+---
 
-1. ツールをインストール
-```bash
-brew install uv direnv
-```
+### 機能概要
 
-2. シェルの設定（~/.zshrc に追記）
+- **音源分離パイプライン (`midimaker separate`)**
+  - `audio-separator` をバックエンドに使用し、BS-Roformer、MDX-Net、Demucs、De-Echo / De-Reverb などのモデルを用いた分離処理を実行。
+  - YAML 設定ファイルにより、複数モデルの組み合わせや処理順序（例: リバーブ除去を適用した後に各楽器の分離を行うなど）をパイプラインとして定義可能。
+- **ドラムMIDI生成 (`midimaker drums`)**
+  - DrumSep によるパーツ分離と ADTOF Plus（Frame_RNN）を用いた打点検出を行い、General MIDI (Ch.10) 形式のMIDIを出力。
+- **ベースMIDI生成 (`midimaker bass`)**
+  - Spotify Basic Pitch を用いてベース音域のピッチ検出を実施。
+  - 単音（モノフォニック）整形および音量閾値によるフィルタリングを適用したMIDIを出力。
+- **テンポ解析・テンポトラックMIDI生成 (`midimaker tempo`)**
+  - Essentia を用いてテンポ（BPM）およびビート位置を解析し、テンポ情報を含むMIDIファイル（Conductor Track）を出力。
+  - 拍ごとの微小な変動を閾値内で平均化する適応型平滑化（Adaptive Segmentation）機能を搭載。
+  - 生成したドラムMIDIやベースMIDIにテンポ情報を埋め込むことで、DAW上での小節グリッド同期に対応。
+- **パッケージ管理**
+  - `uv` を用いた依存関係の管理に対応。
 
-```bash
-# direnv の設定（pyenv より後に読み込む）
-eval "$(direnv hook zsh)"
-
-# VIRTUAL_ENV_PROMPT がセットされている時だけプロジェクト名を表示
-setopt PROMPT_SUBST
-prompt_virtualenv() {
-  if [[ -n "$VIRTUAL_ENV_PROMPT" ]]; then
-    echo "%F{green}(${VIRTUAL_ENV_PROMPT:t})%f "
-  fi
-}
-
-PROMPT='$(prompt_virtualenv)'"$PROMPT"
-```
-
-3. プロジェクト作成と設定
-プロジェクトの作成
-```bash
-# Pythonバージョンの固定と仮想環境 (.venv) の作成
-uv init --python 3.11
-
-# direnvに .venv の自動ロードを指定
-echo "source .venv/bin/activate" > .envrc
-direnv allow
-```
-
-4. 子プロジェクトの作成（任意）
-
-git cloneしたリポジトリにpyproject.tomlが存在するならuv syncで仮想環境が作られる。ただこれだと仮想環境がディレクトリ毎に
-別々になってしまうのでワークスペース（Workspace）機能を使うのが良い
-
-- 子ブロジェクトの作成
-ワークスペースを使う場合は以下のような構成とする
-
-```text
-my-project/
-├── .venv/               # 共有される単一の仮想環境
-├── pyproject.toml       # 親（ルート）
-└── packages/
-    ├── lib-a/
-    │   └── pyproject.toml
-    └── lib-b/
-        └── pyproject.toml
-```
-
-親の pyproject.toml に [tool.uv.workspace] を定義することで子プロジェクトを管理する
-
-```toml
-[project]
-name = "my-project"
-version = "0.1.0"
-dependencies = [
-    # ワークスペース内のパッケージを指定
-    "lib-a",
-]
-
-[tool.uv.workspace]
-members = ["packages/*"]
-
-[tool.uv.sources]
-lib-a = { workspace = true }
-```
-
-親ディレクトリで以下のコマンドを実行するだけでも自動追記されます。
-
-```bash
-uv add --workspace lib-a
-```
-
-4. uvの基本的な使い方
-
-uvのコマンド体系はシンプルで、直感的に操作できます。
-
-uv add: 依存関係を追加
-uv remove: 依存関係を削除
-uv sync: 環境を最新の状態に同期
-uv run: スクリプトを実行
-uv lock: ロックファイルを更新
-
-uv sync を実行すると、自動的に仮想環境（.venv）が作成され、pyproject.toml や uv.lock に記載されている依存関係が高速でインストールされます。
-ワークスペースを定義しておくと、子ディレクトリで uv sync などを実行しても別環境は作られず、親ディレクトリの .venv が自動で共有・同期されます。
-
-# adtof_plus_drum_transcription
-## インストール
-
-子プロジェクトとしてインストールするとpackages以下もリポジトリに入れないとuv syncで再現できないので
-リポジトリを指定する
-
-python3.11の場合は最新のessentiaはコンパイルモジュールが存在しないので先にバージョンを指定してインストールしておく
-
-```
-uv add essentia==2.1b6.dev1389
-uv add git+https://github.com/xavriley/adtof_plus_drum_transcription.git
-```
-
-
-## 実行
-```bash
-adtof-transcribe --audio_path samples/03\ 花と夢.mp3 --output_path samples/03\ 花と夢_drums.mid 
-```
-
-# Spotify Basic Pitch
-## インストール
-
-```bash
-uv add basic-pitch
-```
-
-# Audio Separator
-## インストール
-
-```bash
-uv add "audio-separator[cpu]"
-```
-
-
-# ---------------- 参考
-# OMNIZART
-
-python 3.10 でないと動作しない
-Spotify Basic Pitch(python3.11)と環境が違いすぎるのでインストールはしないことにした
-ベースのMIDI化もイマイチだった
+---
 
 ## インストール
 
-インストールが失敗するので pyproject.tomlに以下を記載する
-```toml
-[tool.uv.extra-build-dependencies]
-madmom = ["setuptools<72", "Cython<3", "numpy<2"]
-vamp = ["setuptools<72", "numpy<2"]
-omnizart = ["setuptools<72", "wheel", "Cython<3", "numpy<2"]
-```
+### 1. 前提条件
+
+MIDImaker は音声処理・フォーマット変換に **ffmpeg** を使用し、パッケージ管理には高速な **[uv](https://docs.astral.sh/uv/)** を使用します。
+
+- **uv** (推奨パッケージマネージャー)
+  ```bash
+  # macOS / Linux
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  # または Homebrew (macOS)
+  brew install uv
+  ```
+- **ffmpeg** (音声処理・フォーマット変換用)
+  ```bash
+  # macOS (Homebrew)
+  brew install ffmpeg
+  # Ubuntu / Debian
+  sudo apt update && sudo apt install ffmpeg
+  ```
+
+> [!NOTE]
+> 音声解析ライブラリ（Essentia等）のビルド互換性のため、**Python 3.11** を推奨・指定しています。リポジトリ内に `.python-version`（3.11）が含まれているため、`uv` が自動的に適切な Python 3.11 環境をセットアップしてくれます。
+
+---
+
+### 2. クローンとセットアップ
+
+リポジトリをクローン後、プロジェクトルートで `uv sync` を実行するだけで仮想環境の作成と依存パッケージのインストールが完了します。
 
 ```bash
-uv add omnizart
+# リポジトリのクローンと移動
+git clone https://github.com/ma0001/MIDImaker.git
+cd MIDImaker
+
+# 依存パッケージのインストールと仮想環境構築
+uv sync
 ```
 
-## 実行
-```bash
-omnizart download-checkpoints
-omnizart music transcribe samples/03\ 花と夢.mp3 -o samples/03\ 花と夢.mid
-```
+> [!TIP]
+> `pyproject.toml` と `uv.lock` に基づき、ドラム解析用の `adtof-plus-drum-transcription`（GitHubリポジトリ依存）や `audio-separator[cpu]`、`essentia` など必要なパッケージがすべて自動で正しく導入されます。
 
-# ---------------- 参考
-# adtof_plus_drum_transcription
+---
 
-子プロジェクトとしてインストールした時の情報を残しておく
+### 3. 動作確認
 
-## インストール
-
-### 子プロジェクトとしてインストールする
-
-親の pyproject.toml に [tool.uv.workspace] を定義することで子プロジェクトを管理する
-
-```toml
-[tool.uv.workspace]
-members = ["packages/*"]
-```
-
-python3.11の場合は最新のessentiaはコンパイルモジュールが存在しないのでバージョンを指定してインストールしておく
-```
-uv add essentia==2.1b6.dev1389
-```
+セットアップが完了したら、以下のいずれかの方法でコマンドが実行できるか確認してください。
 
 ```bash
-mkdir packages
-cd packages
-git clone https://github.com/xavriley/adtof_plus_drum_transcription.git
-cd ..
-uv add --workspace adtof_plus_drum_transcription
+# 方法A: uv run で直接実行する場合
+uv run midimaker --help
+
+# 方法B: 仮想環境をアクティベートして実行する場合
+source .venv/bin/activate
+midimaker --help
 ```
+
+
 
 ## MIDImaker CLI の使い方
 
