@@ -2,7 +2,7 @@
 ピアノ音源（WAV/MP3等）から高精度なMIDIを生成するモジュール
 ByteDanceの piano_transcription_inference をベースに、
 和音（ポリフォニック）、ベロシティ、サステインペダル（CC64）の検出、
-およびノイズゲート・テンポマップ同期を行います。
+およびノイズゲート・連打デバウンス・半音衝突抑制・テンポマップ同期を行います。
 """
 
 import os
@@ -162,6 +162,155 @@ def filter_debounce_notes(
     return removed_count
 
 
+def filter_short_and_quiet_notes(
+    instrument,
+    min_duration_ms: int = 40,
+    min_velocity: int = 25,
+) -> tuple[int, int]:
+    """
+    物理的な打鍵ではあり得ない極小持続時間（チリチリした打撃ノイズや分離アーティファクト）や
+    微弱ベロシティ（ゴーストノート）を除去する関数。
+
+    Parameters:
+        instrument: pretty_midi の Instrument オブジェクト
+        min_duration_ms: 最小持続ミリ秒（これ未満のノートを除去、0で無効）
+        min_velocity: 最小ベロシティ（これ未満のノートを除去、0で無効）
+
+    Returns:
+        (短小ノート除去数, 微弱ノート除去数)
+    """
+    if not instrument.notes:
+        return 0, 0
+
+    min_duration_sec = (min_duration_ms / 1000.0) if min_duration_ms > 0 else 0.0
+    cleaned_notes = []
+    removed_short = 0
+    removed_quiet = 0
+
+    for note in instrument.notes:
+        duration = note.end - note.start
+        # 1. 最小持続時間チェック (40ms未満などの極短ノイズ)
+        if min_duration_sec > 0 and duration < min_duration_sec:
+            removed_short += 1
+            continue
+        # 2. 最小ベロシティチェック (25未満などの微弱ゴースト音)
+        if min_velocity > 0 and note.velocity < min_velocity:
+            removed_quiet += 1
+            continue
+        cleaned_notes.append(note)
+
+    instrument.notes = cleaned_notes
+    return removed_short, removed_quiet
+
+
+def filter_semitone_clash(
+    instrument,
+    clash_window_ms: int = 80,
+    velocity_ratio: float = 0.85,
+    min_overlap_ratio: float = 0.3,
+) -> int:
+    """
+    半音（短2度: ピッチ差1）離れたノートが時間的に重複している場合、
+    音響リークや分離アーティファクトによる不協和音ゴーストノートを検出し、
+    弱い側を除去するインテリジェントフィルター。
+
+    Parameters:
+        instrument: pretty_midi の Instrument オブジェクト
+        clash_window_ms: 同時発音とみなすアタック時間差（ミリ秒）。
+                         この時間差以内の半音衝突は、ベロシティが低い側を確実にゴーストと判定。
+        velocity_ratio: ゴースト判定のベロシティ比率閾値（弱い方のvelocity / 強い方のvelocity）。
+                        同時発音時または重複時に、この比率以下なら弱い方を削除。
+        min_overlap_ratio: 重なり時間の比率閾値（短い方のノート長に対する重複割合）。
+
+    Returns:
+        除去された半音ゴーストノート数
+    """
+    if not instrument.notes:
+        return 0
+
+    # 発音開始時刻順にソート
+    notes = sorted(instrument.notes, key=lambda x: (x.start, x.pitch))
+    clash_window_sec = clash_window_ms / 1000.0 if clash_window_ms > 0 else 0.08
+
+    to_remove = set()
+    n_count = len(notes)
+
+    for i in range(n_count):
+        n1 = notes[i]
+        if id(n1) in to_remove:
+            continue
+
+        for j in range(i + 1, n_count):
+            n2 = notes[j]
+            if id(n2) in to_remove:
+                continue
+
+            # n2の開始がn1の終了以降、かつ同時発音ウィンドウ外であれば、これ以降のノートは衝突しない
+            if n2.start >= n1.end and (n2.start - n1.start) > clash_window_sec:
+                break
+
+            # ピッチ差が半音（1）かチェック
+            if abs(n1.pitch - n2.pitch) != 1:
+                continue
+
+            # 重なり時間の計算
+            overlap = min(n1.end, n2.end) - max(n1.start, n2.start)
+            attack_diff = abs(n1.start - n2.start)
+
+            # 重なりがない場合（かつアタックウィンドウ外）はスキップ
+            if overlap <= 0 and attack_diff > clash_window_sec:
+                continue
+
+            shorter_dur = min(n1.end - n1.start, n2.end - n2.start)
+            overlap_ratio = (overlap / shorter_dur) if shorter_dur > 0 else 0.0
+
+            # 判定ロジック:
+            # 1. 同時アタック（clash_window_sec 以内）
+            # ピアノで半音の同時打鍵は音楽的に極めて稀。
+            # 音量が小さい側、または持続が短い側を確実にゴーストとして除去。
+            if attack_diff <= clash_window_sec:
+                if n1.velocity > n2.velocity:
+                    to_remove.add(id(n2))
+                elif n2.velocity > n1.velocity:
+                    to_remove.add(id(n1))
+                    break  # n1が除去されたので内側ループ終了
+                else:
+                    # ベロシティが全く同一の場合は持続時間が短い方をゴースト判定
+                    dur1 = n1.end - n1.start
+                    dur2 = n2.end - n2.start
+                    if dur1 >= dur2:
+                        to_remove.add(id(n2))
+                    else:
+                        to_remove.add(id(n1))
+                        break
+
+            # 2. 時間的重複がある半音（先行音のサステイン中に後続音が鳴る、など）
+            # 重複割合が有意で、かつ音量差が大きい（弱い方が強い方の85%以下、または微弱音）場合
+            elif overlap_ratio >= min_overlap_ratio:
+                # 強い音と弱い音を識別
+                if n1.velocity >= n2.velocity:
+                    strong_n, weak_n = n1, n2
+                    weak_is_n1 = False
+                else:
+                    strong_n, weak_n = n2, n1
+                    weak_is_n1 = True
+
+                is_weak_ratio = weak_n.velocity <= (strong_n.velocity * velocity_ratio)
+                is_weak_absolute = weak_n.velocity < 40  # 絶対音量が小さく紛れ込んだゴースト
+
+                if is_weak_ratio or is_weak_absolute:
+                    if weak_is_n1:
+                        to_remove.add(id(n1))
+                        break  # n1が除去されたので内側ループ終了
+                    else:
+                        to_remove.add(id(n2))
+
+    cleaned_notes = [n for n in notes if id(n) not in to_remove]
+    removed_count = len(instrument.notes) - len(cleaned_notes)
+    instrument.notes = cleaned_notes
+    return removed_count
+
+
 def transcribe_piano(
     audio_path: Union[str, Path],
     output_path: Optional[Union[str, Path]] = None,
@@ -170,6 +319,10 @@ def transcribe_piano(
     pedal_offset_threshold: float = 0.2,
     min_volume_db: Optional[float] = -45.0,
     debounce_ms: Optional[int] = 120,
+    filter_semitone: bool = True,
+    clash_window_ms: int = 80,
+    min_duration_ms: Optional[int] = 40,
+    min_velocity: Optional[int] = 25,
     tempo: Optional[Union[float, int, str, Path]] = 120.0,
     tempo_tolerance: float = 0.8,
     device: Optional[str] = None,
@@ -186,6 +339,10 @@ def transcribe_piano(
         pedal_offset_threshold: ペダル離鍵判定閾値（0.0〜1.0、デフォルト: 0.2）
         min_volume_db: ノイズゲート音量閾値（dB）。これ以下の微小音・無音区間のノートを除外
         debounce_ms: エコー・残響による同一キー連打抑制ミリ秒（デフォルト: 120ms、0で無効）
+        filter_semitone: 半音衝突（短2度ゴースト）除去フィルターを有効にするか（デフォルト: True）
+        clash_window_ms: 同時発音とみなすアタック時間差ミリ秒（デフォルト: 80ms）
+        min_duration_ms: 最小持続ミリ秒（40ms未満などの極短ノイズノートを除去、0またはNoneで無効）
+        min_velocity: 最小ベロシティ（25未満などの微小音量ノートを除去、0またはNoneで無効）
         tempo: 出力MIDIのテンポBPM数値（例: 120, 140）またはテンポMIDI/解析元音声ファイルパス
         tempo_tolerance: テンポ解析元の音声からテンポ抽出する際の揺らぎ平滑化許容幅（BPM、デフォルト: 0.8）
         device: 実行デバイス ('cpu', 'cuda', 'mps' または None で自動選択)
@@ -232,8 +389,12 @@ def transcribe_piano(
     )
     if min_volume_db is not None:
         print(f"   ├─ ノイズゲート: {min_volume_db} dB 以下の微弱音を除外")
+    if (min_duration_ms is not None and min_duration_ms > 0) or (min_velocity is not None and min_velocity > 0):
+        print(f"   ├─ ノイズ除去: 最小持続={min_duration_ms or 0}ms, 最小Velocity={min_velocity or 0}")
     if debounce_ms is not None and debounce_ms > 0:
         print(f"   ├─ 連打抑制 (デバウンス): {debounce_ms} ms 以内のエコー誤検知をマージ")
+    if filter_semitone:
+        print(f"   ├─ 半音衝突抑制: 同時発音窓={clash_window_ms}ms (短2度不協和音ゴーストを除去)")
     if target_tempo_file is not None:
         print(f"   ├─ テンポ音源/MIDI: {target_tempo_file.name} (完了後にマージ)")
     else:
@@ -268,7 +429,7 @@ def transcribe_piano(
     print("   ├─ ニューラルネットワーク推論を実行中...")
     transcriber.transcribe(audio, str(output_file))
 
-    # 後処理（ノイズゲート ＆ 連打デバウンスフィルター）
+    # 後処理（ノイズゲート・短小/微弱カット・連打デバウンス・半音衝突フィルター）
     if output_file.exists():
         pm = pretty_midi.PrettyMIDI(str(output_file))
         modified = False
@@ -278,12 +439,39 @@ def transcribe_piano(
                 if min_volume_db is not None:
                     filter_by_volume_gate(inst, audio, sr=sample_rate, min_volume_db=min_volume_db)
                     modified = True
-                # 2. エコー・残響による同一キー連打抑制（デバウンス）
+
+                # 2. 短小ノート＆微弱ベロシティフィルター
+                if (min_duration_ms is not None and min_duration_ms > 0) or (
+                    min_velocity is not None and min_velocity > 0
+                ):
+                    rem_short, rem_quiet = filter_short_and_quiet_notes(
+                        inst,
+                        min_duration_ms=min_duration_ms or 0,
+                        min_velocity=min_velocity or 0,
+                    )
+                    if rem_short > 0 or rem_quiet > 0:
+                        print(
+                            f"   ├─ 🧹 [ノイズ除去] 極短ノート {rem_short} 件 / 微弱ノート {rem_quiet} 件を除去しました"
+                        )
+                        modified = True
+
+                # 3. エコー・残響による同一キー連打抑制（デバウンス）
                 if debounce_ms is not None and debounce_ms > 0:
                     removed_notes = filter_debounce_notes(inst, debounce_ms=debounce_ms)
                     if removed_notes > 0:
                         print(f"   ├─ 🔇 [連打抑制] エコー/残響による重複ノート {removed_notes} 件をマージ除去しました")
-                    modified = True
+                        modified = True
+
+                # 4. 半音衝突（短2度ゴースト）抑制フィルター
+                if filter_semitone:
+                    removed_clashes = filter_semitone_clash(
+                        inst,
+                        clash_window_ms=clash_window_ms,
+                    )
+                    if removed_clashes > 0:
+                        print(f"   ├─ 🎹 [半音衝突抑制] 不協和音ゴーストノート {removed_clashes} 件を除去しました")
+                        modified = True
+
         if modified:
             pm.write(str(output_file))
 

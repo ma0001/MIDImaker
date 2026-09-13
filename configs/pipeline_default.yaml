@@ -121,8 +121,11 @@ steps:
     input: "demucs_6s.piano"   # Step 4 で分離されたピアノWAVを入力！
     output_name: "{basename}_piano.mid"
     tempo: "tempo_track"       # 👈 Step 6 で出力されたテンポMIDIファイルを指定！
-    onset_threshold: 0.35      # アタック感度 (0.35でエコーの微弱な立ち上がりをスルー)
+    onset_threshold: 0.40      # アタック感度 (0.40で分離ノイズの拾いすぎを抑制)
     min_volume_db: -40.0       # ノイズゲート閾値 (微弱な残響・ゴーストノートを除外)
-    debounce_ms: 120           # 連打抑制フィルター (120ms以内のエコー跳ね返り重複ノートを自動タイマージ)
+    debounce_ms: 120           # 連打抑制フィルター (120ms以内のエコー跳ね返り重複ノートを自動タイ結合)
+    filter_semitone: true      # 半音衝突抑制 (短2度不協和音ゴーストノートを自動消去)
+    min_duration_ms: 40        # 極短ノイズ除去 (40ms未満の打撃ノイズやチリチリ音を除外)
+    min_velocity: 25           # 微弱ゴースト除去 (ベロシティ25未満の極小ノートを除外)
 
 

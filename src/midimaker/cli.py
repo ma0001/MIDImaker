@@ -229,6 +229,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="エコーや残響による同一キー連打（ゴーストノート）抑制ミリ秒 (0で無効、デフォルト: 120ms)",
     )
     piano_parser.add_argument(
+        "--no-semitone-filter",
+        action="store_true",
+        help="半音衝突（短2度ゴースト）抑制フィルターを無効化するフラグ",
+    )
+    piano_parser.add_argument(
+        "--clash-window-ms",
+        type=int,
+        default=80,
+        help="半音衝突と判定する同時発音アタック時間差ミリ秒 (デフォルト: 80ms)",
+    )
+    piano_parser.add_argument(
+        "--min-duration-ms",
+        type=int,
+        default=40,
+        help="最小持続ミリ秒。40ms未満などの極短ノイズノートを除去 (0で無効、デフォルト: 40ms)",
+    )
+    piano_parser.add_argument(
+        "--min-velocity",
+        type=int,
+        default=25,
+        help="最小ベロシティ。25未満などの微小音量ノートを除去 (0で無効、デフォルト: 25)",
+    )
+    piano_parser.add_argument(
         "-t", "--tempo",
         type=str,
         default="120.0",
@@ -454,6 +477,10 @@ def main() -> None:
                 pedal_offset_threshold=args.pedal_threshold,
                 min_volume_db=args.min_volume_db if args.min_volume_db > -900 else None,
                 debounce_ms=args.debounce_ms,
+                filter_semitone=not args.no_semitone_filter,
+                clash_window_ms=args.clash_window_ms,
+                min_duration_ms=args.min_duration_ms if args.min_duration_ms > 0 else None,
+                min_velocity=args.min_velocity if args.min_velocity > 0 else None,
                 tempo=args.tempo,
                 tempo_tolerance=args.tempo_tolerance,
                 device=args.device,

@@ -573,6 +573,10 @@ class StemPipelineRunner:
                         pedal_offset_threshold=step.get("pedal_threshold", 0.2),
                         min_volume_db=step.get("min_volume_db", -45.0),
                         debounce_ms=step.get("debounce_ms", 120),
+                        filter_semitone=step.get("filter_semitone", step.get("filter_semitone_clash", True)),
+                        clash_window_ms=step.get("clash_window_ms", 80),
+                        min_duration_ms=step.get("min_duration_ms", 40),
+                        min_velocity=step.get("min_velocity", 25),
                         tempo=resolved_tempo or 120.0,
                         tempo_tolerance=step.get("tempo_tolerance", 0.8),
                         device=step.get("device", "auto"),
@@ -1090,6 +1094,10 @@ class StemPipelineRunner:
                 pedal_threshold = step.get("pedal_threshold", 0.2)
                 min_volume_db = step.get("min_volume_db", -45.0)
                 debounce_ms = step.get("debounce_ms", 120)
+                filter_semitone = step.get("filter_semitone", step.get("filter_semitone_clash", True))
+                clash_window_ms = step.get("clash_window_ms", 80)
+                min_duration_ms = step.get("min_duration_ms", 40)
+                min_velocity = step.get("min_velocity", 25)
                 tempo_tolerance = step.get("tempo_tolerance", 0.8)
                 device = step.get("device", "auto")
                 model_dir = step.get("model_dir")
@@ -1104,6 +1112,11 @@ class StemPipelineRunner:
                 print(f"      - pedal_threshold: {pedal_threshold} (ペダル離鍵感度)")
                 print(f"      - min_volume_db: {min_volume_db} dB (ノイズゲート)")
                 print(f"      - debounce_ms: {debounce_ms} ms (エコー連打抑制フィルター)")
+                print(f"      - filter_semitone: {filter_semitone} (半音衝突/短2度ゴースト抑制)")
+                if filter_semitone:
+                    print(f"      - clash_window_ms: {clash_window_ms} ms (同時発音判定ウィンドウ)")
+                print(f"      - min_duration_ms: {min_duration_ms} ms (極短ノイズ除去)")
+                print(f"      - min_velocity: {min_velocity} (微弱ゴースト除去)")
                 print(f"      - tempo_tolerance: {tempo_tolerance} BPM (テンポ平滑化許容幅)")
                 print(f"      - device: {device}")
                 if model_dir:
@@ -1119,6 +1132,14 @@ class StemPipelineRunner:
                     cmd_parts.append(f"--min-volume-db {min_volume_db}")
                 if debounce_ms:
                     cmd_parts.append(f"--debounce-ms {debounce_ms}")
+                if not filter_semitone:
+                    cmd_parts.append("--no-semitone-filter")
+                elif clash_window_ms != 80:
+                    cmd_parts.append(f"--clash-window-ms {clash_window_ms}")
+                if min_duration_ms:
+                    cmd_parts.append(f"--min-duration-ms {min_duration_ms}")
+                if min_velocity:
+                    cmd_parts.append(f"--min-velocity {min_velocity}")
                 if tempo_tolerance != 0.8:
                     cmd_parts.append(f"--tempo-tolerance {tempo_tolerance}")
                 if device != "auto":
