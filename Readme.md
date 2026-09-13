@@ -249,21 +249,21 @@ MIDI生成ステップ（`drums_midi`, `bass_midi`）やパイプライン全体
 
 ```bash
 # 基本的な使い方（入力ファイルと同じ場所に _bass.mid が出力されます）
-uv run midimaker bass "path/to/bass_stem.wav"
+midimaker bass "path/to/bass_stem.wav"
 
 # 出力ファイル名を指定する場合
-uv run midimaker bass "path/to/bass_stem.wav" -o "output.mid"
+midimaker bass "path/to/bass_stem.wav" -o "output.mid"
 
 # またはエイリアスコマンド
-uv run midimaker-bass "path/to/bass_stem.wav"
+midimaker-bass "path/to/bass_stem.wav"
 
 # テンポBPMを指定する場合（例: 135 BPM）
-uv run midimaker bass "path/to/bass_stem.wav" -t 135
+midimaker bass "path/to/bass_stem.wav" -t 135
 
 # テンポ情報（テンポMIDIまたはフルミックス音源）をベースMIDIにマージする場合
-uv run midimaker bass "path/to/bass_stem.wav" -t "path/to/full_mix_tempo.mid"
+midimaker bass "path/to/bass_stem.wav" -t "path/to/full_mix_tempo.mid"
 # またはフルミックス音源を直接指定して自動マージ（ドラムとタイミングが完全一致します）
-uv run midimaker bass "path/to/bass_stem.wav" -t "path/to/full_mix.mp3"
+midimaker bass "path/to/bass_stem.wav" -t "path/to/full_mix.mp3"
 ```
 
 #### 主なオプション設定
@@ -336,19 +336,19 @@ DAW（Logic Pro, Cubase, Studio One, Ableton Live等）のプロジェクトに�
 ```bash
 # 基本的な使い方（入力ファイルと同じ場所に _tempo.mid が出力されます）
 # デフォルトで楽曲の揺らぎに追従する「テンポマップ」を出力（数秒で完了）
-uv run midimaker tempo "path/to/song.mp3"
+midimaker tempo "path/to/song.mp3"
 
 # 出力先を指定する場合
-uv run midimaker tempo "path/to/song.mp3" -o "tempo_map.mid"
+midimaker tempo "path/to/song.mp3" -o "tempo_map.mid"
 
 # またはエイリアスコマンド
-uv run midimaker-tempo "path/to/song.mp3"
+midimaker-tempo "path/to/song.mp3"
 
 # テンポマップではなく、代表固定BPM単一で出力したい場合
-uv run midimaker tempo "path/to/song.mp3" --fixed
+midimaker tempo "path/to/song.mp3" --fixed
 
 # テンポ揺らぎの平滑化幅を調整する場合（0以下の場合は平滑化無効）
-uv run midimaker tempo "path/to/song.mp3" --tolerance 1.0
+midimaker tempo "path/to/song.mp3" --tolerance 1.0
 ```
 
 #### 主なオプション設定
