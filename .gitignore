@@ -11,3 +11,6 @@ wheels/
 
 samples/*
 scratch/
+
+# Local agent rules
+AGENTS.md
