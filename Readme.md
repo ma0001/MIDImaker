@@ -16,6 +16,9 @@
 - **ベースMIDI生成 (`midimaker bass`)**
   - Spotify Basic Pitch を用いてベース音域のピッチ検出を実施。
   - 単音（モノフォニック）整形および音量閾値によるフィルタリングを適用したMIDIを出力。
+- **ピアノMIDI生成 (`midimaker piano`)**
+  - ByteDance の `piano_transcription_inference` を用いて和音（ポリフォニック）、打鍵ベロシティ、およびサステインペダル（CC64）を高精度に検出・MIDI出力。
+  - テンポ解析モジュールと連動し、DAWのグリッドに沿った演奏情報として出力。
 - **テンポ解析・テンポトラックMIDI生成 (`midimaker tempo`)**
   - Essentia を用いてテンポ（BPM）およびビート位置を解析し、テンポ情報を含むMIDIファイル（Conductor Track）を出力。
   - 拍ごとの微小な変動を閾値内で平均化する適応型平滑化（Adaptive Segmentation）機能を搭載。
@@ -116,7 +119,7 @@ midimaker separate --list-all
 | `-o`, `--output-dir` | 入力ファイルと同階層 | ステムWAVファイルおよびMIDIファイルの出力先ディレクトリ |
 | `-t`, `--tempo` | `input` (自動解析) | MIDIのテンポBPM数値（例: `120`）または外部テンポMIDI/音声ファイルパス（設定ファイル値を上書き） |
 | `--format` | `WAV` | 出力フォーマット (`WAV`, `FLAC`, `MP3`, `M4A`, `OGG`) |
-| `--model-dir` | `/tmp/audio-separator-models/` | モデルキャッシュ保存先ディレクトリ |
+| `--model-dir` | `~/.cache/midimaker/models/` | モデルキャッシュ保存先ディレクトリ |
 | `--list-models` | - | おすすめモデルとエイリアス一覧を表示して終了 |
 | `--list-all` | - | 対応する全モデル一覧を表示して終了 |
 
@@ -170,7 +173,15 @@ steps:
     target_stems: ["vocals"]
     output_name: "{basename}_vocals"
 
-  # Step 4: ドラム・ベース・ボーカルを除いたその他（Other）の抽出 (Demucs v4)
+  # Step 4: ピアノ抽出 (Demucs 6s)
+  - name: "piano"
+    type: "separate"
+    model: "demucs-6s"
+    input: "input"
+    target_stems: ["piano"]
+    output_name: "{basename}_piano"
+
+  # Step 5: ドラム・ベース・ボーカルを除いたその他（Other）の抽出 (Demucs v4)
   - name: "other_sep"
     type: "separate"
     model: "demucs-ft"
@@ -178,7 +189,7 @@ steps:
     target_stems: ["other"]
     output_name: "{basename}_other"
 
-  # Step 5: ボーカルのみに De-Echo / De-Reverb を適用（完全ドライボーカル化）
+  # Step 6: ボーカルのみに De-Echo / De-Reverb を適用（完全ドライボーカル化）
   - name: "vocal_dereverb"
     type: "separate"
     model: "dereverb-echo"
@@ -186,25 +197,32 @@ steps:
     target_stems: ["dry"]
     output_name: "{basename}_vocals_dry"
 
-  # Step 6: テンポ解析＆テンポトラックMIDI生成 (Essentia)
+  # Step 7: テンポ解析＆テンポトラックMIDI生成 (Essentia)
   - name: "tempo_track"
     type: "tempo_midi"
     input: "input"             # 元音源からテンポマップを解析してテンポMIDIを出力
     output_name: "{basename}_tempo.mid"
 
-  # Step 7: ドラムWAVからドラムMIDIを自動生成 (Step 6 のテンポMIDIを同期元に入力！)
+  # Step 8: ドラムWAVからドラムMIDIを自動生成 (Step 7 のテンポMIDIを同期元に入力！)
   - name: "drums_midi"
     type: "drums_midi"
     input: "drums.drums"       # Step 1 で分離されたドラムWAVを入力！
     output_name: "{basename}_drums.mid"
-    tempo: "tempo_track"       # 👈 Step 6 のテンポMIDIファイルを入力！
+    tempo: "tempo_track"       # 👈 Step 7 のテンポMIDIファイルを入力！
 
-  # Step 8: ベースWAVからベースMIDIを自動生成 (Step 6 のテンポMIDIを同期元に入力！)
+  # Step 9: ベースWAVからベースMIDIを自動生成 (Step 7 のテンポMIDIを同期元に入力！)
   - name: "bass_midi"
     type: "bass_midi"
     input: "bass.bass"         # Step 2 で分離されたベースWAVを入力！
     output_name: "{basename}_bass.mid"
-    tempo: "tempo_track"       # 👈 Step 6 のテンポMIDIファイルを入力！
+    tempo: "tempo_track"       # 👈 Step 7 のテンポMIDIファイルを入力！
+
+  # Step 10: ピアノWAVからピアノMIDIを自動生成 (Step 7 のテンポMIDIを同期元に入力！)
+  - name: "piano_midi"
+    type: "piano_midi"
+    input: "piano.piano"       # Step 4 で分離されたピアノWAVを入力！
+    output_name: "{basename}_piano.mid"
+    tempo: "tempo_track"       # 👈 Step 7 のテンポMIDIファイルを入力！
 ```
 
 ##### 各ステップの `input`（入力音源）の指定方法
@@ -323,6 +341,39 @@ midimaker drums "path/to/drums_stem.wav" -t "path/to/full_mix.mp3"
 > **GarageBandユーザーへのおすすめワークフロー**
 > GarageBandはノートが存在しないテンポ専用MIDIのインポートに対応していません。
 > `midimaker drums "drums.wav" -t "song.mp3"` で**テンポ情報をマージしたドラムMIDI**を生成し、FinderでそのドラムMIDIを **右クリック ＞「このアプリケーションで開く ＞ GarageBand」** することで、プロジェクトのテンポ（BPM）が自動設定された状態でプロジェクトをスタートできます。
+
+
+### 🎹 ピアノ音源から高精度MIDIを生成 (piano_transcription_inference)
+
+ByteDance の最先端ピアノ採譜モデル `piano_transcription_inference` をバックエンドに採用し、ソロピアノやバンド内のピアノパート（`demucs-6s` 等で分離したピアノステム）から、和音（ポリフォニック）・ベロシティ・**サステインペダル（ダンパーペダル / CC64）**を含む高精度なMIDIファイルを生成します。
+
+```bash
+# 基本的な使い方 (ピアノ音源から MIDI を出力)
+midimaker piano "path/to/piano.wav"
+
+# またはエイリアスコマンド
+midimaker-piano "path/to/piano.wav"
+
+# テンポ同期（元楽曲のビートマップに自動同期）
+midimaker piano "stems/piano.wav" -t "song.mp3"
+
+# 出力先を指定する場合
+midimaker piano "piano.wav" -o "output_piano.mid"
+```
+
+#### 主なオプション設定
+
+| オプション | デフォルト値 | 説明 |
+| :--- | :--- | :--- |
+| `-o`, `--output` | 自動命名 | 出力先MIDIファイルパス (省略時は `{入力名}_piano.mid`) |
+| `--onset-threshold` | `0.3` | 発音（アタック）の検出感度（0.0〜1.0）。上げるほど誤検出が減少 |
+| `--frame-threshold` | `0.1` | 音の持続フレーム判定の閾値（0.0〜1.0） |
+| `--pedal-threshold` | `0.2` | サステインペダルの離鍵（Offset）判定閾値（0.0〜1.0） |
+| `--min-volume-db` | `-45.0` | ノイズゲート音量閾値（dB）。無音区間やヒスノイズによる微小音を除外 |
+| `-t`, `--tempo` | `120.0` | テンポBPM数値（例: `120`）、またはマージするテンポMIDI/解析元音声ファイルパス |
+| `--tempo-tolerance` | `0.8` | テンポ解析元の音声からテンポ抽出する際の平滑化許容幅 (BPM) |
+| `--device` | `auto` | 推論実行デバイス (`auto`, `cpu`, `cuda`, `mps`) |
+| `--model-dir` | `~/.cache/midimaker/piano/` | モデルキャッシュ保存先ディレクトリ |
 
 
 ### ⏱️ 楽曲からテンポ専用MIDI（Tempo Track）を生成 (Essentia)

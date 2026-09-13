@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import yaml
 from audio_separator.separator import Separator
+from midimaker.paths import MODELS_DIR, ensure_cache_dirs
 
 # ロガーの設定
 logger = logging.getLogger("midimaker.separator")
@@ -194,7 +195,8 @@ class StemPipelineRunner:
         self.config = config
         self.output_format = (output_format or config.get("output_format", "WAV")).upper()
         self.output_dir = Path(output_dir) if output_dir else None
-        self.model_file_dir = str(model_file_dir) if model_file_dir else "/tmp/audio-separator-models/"
+        ensure_cache_dirs()
+        self.model_file_dir = str(model_file_dir) if model_file_dir else str(MODELS_DIR)
         self.log_level = log_level
 
         # CLI または設定ファイルからのテンポ指定（CLI指定があれば優先上書き）
@@ -530,8 +532,61 @@ class StemPipelineRunner:
                     final_published_files.append(created_midi)
                     print(f"    - テンポMIDI生成完了: {created_midi.name}")
 
+                # =============================================================
+                # 種別 E: ピアノMIDI生成 (piano_transcription_inference)
+                # =============================================================
+                elif step_type in ("piano_midi", "piano"):
+                    from midimaker.piano import transcribe_piano
+
+                    input_ref = step.get("input", "input")
+                    source_audio = self._resolve_step_input(
+                        input_ref=input_ref,
+                        initial_input_path=input_path,
+                        step_outputs=step_outputs,
+                    )
+                    print(f"    - 入力音源: {source_audio.name}")
+
+                    # テンポ解決
+                    resolved_tempo = self._resolve_step_tempo(
+                        step_tempo_ref=step.get("tempo"),
+                        initial_input_path=input_path,
+                        step_outputs=step_outputs,
+                    )
+                    if resolved_tempo is not None:
+                        print(f"    - テンポ指定/解析同期: {resolved_tempo}")
+
+                    # 出力先MIDIパスの決定
+                    output_template = step.get("output_name", "{basename}_piano.mid")
+                    if isinstance(output_template, dict):
+                        output_template = output_template.get("midi", "{basename}_piano.mid")
+                    formatted_midi_name = output_template.format(basename=basename, step=step_name)
+                    if not formatted_midi_name.lower().endswith(".mid"):
+                        formatted_midi_name = f"{formatted_midi_name}.mid"
+                    dest_midi_path = target_output_dir / formatted_midi_name
+
+                    print(f"    - ピアノMIDI変換を実行中 (piano_transcription_inference)...")
+                    created_midi = transcribe_piano(
+                        audio_path=source_audio,
+                        output_path=dest_midi_path,
+                        onset_threshold=step.get("onset_threshold", 0.3),
+                        frame_threshold=step.get("frame_threshold", 0.1),
+                        pedal_offset_threshold=step.get("pedal_threshold", 0.2),
+                        min_volume_db=step.get("min_volume_db", -45.0),
+                        tempo=resolved_tempo or 120.0,
+                        tempo_tolerance=step.get("tempo_tolerance", 0.8),
+                        device=step.get("device", "auto"),
+                        checkpoint_path=step.get("model_dir"),
+                    )
+
+                    step_outputs[step_name] = {
+                        "all_files": [created_midi],
+                        "stem_map": {"midi": created_midi, "piano": created_midi},
+                    }
+                    final_published_files.append(created_midi)
+                    print(f"    - ピアノMIDI生成完了: {created_midi.name}")
+
                 else:
-                    raise ValueError(f"未知のステップ種別です: '{step_type}' (有効値: separate, drums_midi, bass_midi, tempo_midi)")
+                    raise ValueError(f"未知のステップ種別です: '{step_type}' (有効値: separate, drums_midi, bass_midi, piano_midi, tempo_midi)")
 
             print(f"\n✨ すべてのパイプラインステップが正常に完了しました！")
             for f in final_published_files:

@@ -103,6 +103,10 @@ def transcribe_drums(
         print(f"   ├─ 指定テンポ: {parsed_bpm:.1f} BPM (完了後に適用)")
     print(f"   └─ 出力先: {output_file.name}")
 
+    # キャッシュ環境変数を設定して ~/.cache/midimaker/ 配下にモデルを保存させる
+    from midimaker.paths import setup_environment_cache
+    setup_environment_cache()
+
     # ADTOF Plus の推論モジュールを遅延インポート
     from adtof_plus_drum_transcription.core import transcribe_drums as adtof_transcribe_drums
 

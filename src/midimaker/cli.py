@@ -179,6 +179,76 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     # ----------------------------------------------------
+    # サブコマンド: piano (ピアノ音源からMIDI生成)
+    # ----------------------------------------------------
+    piano_parser = subparsers.add_parser(
+        "piano",
+        help="ピアノ音源から高精度なMIDI（和音・ベロシティ・サステインペダル）を生成",
+        description="piano_transcription_inference (ByteDance) をベースに、ポリフォニック和音、ペダル情報（CC64）、テンポ同期に対応したピアノMIDIを出力します。",
+    )
+
+    piano_parser.add_argument(
+        "input",
+        type=str,
+        help="入力音声ファイルのパス (WAV, MP3, FLAC等)",
+    )
+    piano_parser.add_argument(
+        "-o", "--output",
+        type=str,
+        default=None,
+        help="出力先MIDIファイルパス (省略時は入力ファイル名_piano.mid)",
+    )
+    piano_parser.add_argument(
+        "--onset-threshold",
+        type=float,
+        default=0.3,
+        help="アタック（Onset）の検出閾値 (0.0〜1.0, デフォルト: 0.3)",
+    )
+    piano_parser.add_argument(
+        "--frame-threshold",
+        type=float,
+        default=0.1,
+        help="音の持続フレーム判定の閾値 (0.0〜1.0, デフォルト: 0.1)",
+    )
+    piano_parser.add_argument(
+        "--pedal-threshold",
+        type=float,
+        default=0.2,
+        help="サステインペダルの離鍵（Offset）判定閾値 (0.0〜1.0, デフォルト: 0.2)",
+    )
+    piano_parser.add_argument(
+        "--min-volume-db",
+        type=float,
+        default=-45.0,
+        help="ノイズゲートの音量閾値 dB (デフォルト: -45.0dB)。微小ノイズを除去 (無効にする場合は -999 等を指定)",
+    )
+    piano_parser.add_argument(
+        "-t", "--tempo",
+        type=str,
+        default="120.0",
+        help="MIDIのテンポBPM数値（例: 120, 140）またはマージするテンポMIDI/解析元音声ファイルパス（デフォルト: 120.0）",
+    )
+    piano_parser.add_argument(
+        "--tempo-tolerance",
+        type=float,
+        default=0.8,
+        help="テンポ解析元の音声からテンポ抽出する際の揺らぎ平滑化許容幅 BPM (デフォルト: 0.8BPM)",
+    )
+    piano_parser.add_argument(
+        "--device",
+        type=str,
+        default="auto",
+        choices=["auto", "cpu", "cuda", "mps"],
+        help="推論を実行するデバイス (デフォルト: auto)",
+    )
+    piano_parser.add_argument(
+        "--model-dir",
+        type=str,
+        default=None,
+        help="モデルキャッシュ保存先ディレクトリ (デフォルト: ~/.cache/midimaker/piano/)",
+    )
+
+    # ----------------------------------------------------
     # サブコマンド: separate (ステム音源分離パイプライン)
     # ----------------------------------------------------
     separate_parser = subparsers.add_parser(
@@ -217,7 +287,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--model-dir",
         type=str,
         default=None,
-        help="モデルキャッシュ保存先ディレクトリ (デフォルト: /tmp/audio-separator-models/)",
+        help="モデルキャッシュ保存先ディレクトリ (デフォルト: ~/.cache/midimaker/models/)",
     )
     separate_parser.add_argument(
         "-t", "--tempo",
@@ -341,6 +411,27 @@ def main() -> None:
             print(f"❌ エラーが発生しました: {e}", file=sys.stderr)
             sys.exit(1)
 
+    elif args.command == "piano":
+        # ヘルプ表示を爆速にするため、実行時に初めて重い推論モジュールをインポートする
+        from midimaker.piano import transcribe_piano
+
+        try:
+            transcribe_piano(
+                audio_path=args.input,
+                output_path=args.output,
+                onset_threshold=args.onset_threshold,
+                frame_threshold=args.frame_threshold,
+                pedal_offset_threshold=args.pedal_threshold,
+                min_volume_db=args.min_volume_db if args.min_volume_db > -900 else None,
+                tempo=args.tempo,
+                tempo_tolerance=args.tempo_tolerance,
+                device=args.device,
+                checkpoint_path=args.model_dir,
+            )
+        except Exception as e:
+            print(f"❌ エラーが発生しました: {e}", file=sys.stderr)
+            sys.exit(1)
+
     else:
         parser.print_help()
 
@@ -370,5 +461,12 @@ def separate_cli() -> None:
     """midimaker-separate コマンドとして直接ステム分離を実行するエントリーポイント"""
     if len(sys.argv) > 1 and sys.argv[1] != "separate":
         sys.argv.insert(1, "separate")
+    main()
+
+
+def piano_cli() -> None:
+    """midimaker-piano コマンドとして直接ピアノ変換を実行するエントリーポイント"""
+    if len(sys.argv) > 1 and sys.argv[1] != "piano":
+        sys.argv.insert(1, "piano")
     main()
 

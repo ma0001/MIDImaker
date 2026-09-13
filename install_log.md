@@ -31,6 +31,15 @@ uv add basic-pitch
 uv add "audio-separator[cpu]"
 ```
 
+# add piano_transcription_inference
+## インストール
+
+```bash
+uv add piano_transcription_inference
+```
+
+
+
 
 # ---------------- 参考
 # OMNIZART
