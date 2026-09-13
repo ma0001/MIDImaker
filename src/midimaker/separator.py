@@ -572,6 +572,7 @@ class StemPipelineRunner:
                         frame_threshold=step.get("frame_threshold", 0.1),
                         pedal_offset_threshold=step.get("pedal_threshold", 0.2),
                         min_volume_db=step.get("min_volume_db", -45.0),
+                        debounce_ms=step.get("debounce_ms", 120),
                         tempo=resolved_tempo or 120.0,
                         tempo_tolerance=step.get("tempo_tolerance", 0.8),
                         device=step.get("device", "auto"),

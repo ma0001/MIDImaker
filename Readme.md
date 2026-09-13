@@ -363,6 +363,7 @@ midimaker piano "piano.wav" -o "output_piano.mid"
 | `--frame-threshold` | `0.1` | 音の持続フレーム判定の閾値（0.0〜1.0） |
 | `--pedal-threshold` | `0.2` | サステインペダルの離鍵（Offset）判定閾値（0.0〜1.0） |
 | `--min-volume-db` | `-45.0` | ノイズゲート音量閾値（dB）。無音区間やヒスノイズによる微小音を除外 |
+| `--debounce-ms` | `120` | エコー・残響・サステインの揺らぎによる同一キー連打（ゴーストノート）抑制ミリ秒。0で無効 |
 | `-t`, `--tempo` | `120.0` | テンポBPM数値（例: `120`）、またはマージするテンポMIDI/解析元音声ファイルパス |
 | `--tempo-tolerance` | `0.8` | テンポ解析元の音声からテンポ抽出する際の平滑化許容幅 (BPM) |
 | `--device` | `auto` | 推論実行デバイス (`auto`, `cpu`, `cuda`, `mps`) |

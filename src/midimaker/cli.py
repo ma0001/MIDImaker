@@ -223,6 +223,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="ノイズゲートの音量閾値 dB (デフォルト: -45.0dB)。微小ノイズを除去 (無効にする場合は -999 等を指定)",
     )
     piano_parser.add_argument(
+        "--debounce-ms",
+        type=int,
+        default=120,
+        help="エコーや残響による同一キー連打（ゴーストノート）抑制ミリ秒 (0で無効、デフォルト: 120ms)",
+    )
+    piano_parser.add_argument(
         "-t", "--tempo",
         type=str,
         default="120.0",
@@ -423,6 +429,7 @@ def main() -> None:
                 frame_threshold=args.frame_threshold,
                 pedal_offset_threshold=args.pedal_threshold,
                 min_volume_db=args.min_volume_db if args.min_volume_db > -900 else None,
+                debounce_ms=args.debounce_ms,
                 tempo=args.tempo,
                 tempo_tolerance=args.tempo_tolerance,
                 device=args.device,

@@ -105,6 +105,63 @@ def filter_by_volume_gate(
     instrument.notes = gated_notes
 
 
+def filter_debounce_notes(
+    instrument,
+    debounce_ms: int = 120,
+) -> int:
+    """
+    エコー、ディレイ、リバーブの跳ね返りやサステイン揺らぎによる
+    同一ピッチの連続誤検知（マシンガン連打・ゴーストノート）を抑制するデバウンス関数。
+
+    Parameters:
+        instrument: pretty_midi の Instrument オブジェクト
+        debounce_ms: 連打とみなす最小発音間隔（ミリ秒）。
+                     直前ノートからこの時間未満、または直前ノートが持続中に
+                     同等以下の音量で再発音された場合、エコーとみなして直前ノートに統合（タイ化）する。
+
+    Returns:
+        除去・マージされたゴーストノート数
+    """
+    if debounce_ms <= 0 or not instrument.notes:
+        return 0
+
+    min_gap_sec = debounce_ms / 1000.0
+    notes_by_pitch = {}
+    for n in instrument.notes:
+        notes_by_pitch.setdefault(n.pitch, []).append(n)
+
+    cleaned_notes = []
+    removed_count = 0
+
+    for pitch, p_notes in notes_by_pitch.items():
+        # 発音開始時刻順にソート
+        p_notes.sort(key=lambda x: x.start)
+        last_note = None
+
+        for n in p_notes:
+            if last_note is None:
+                last_note = n
+                cleaned_notes.append(n)
+            else:
+                gap = n.start - last_note.start
+                # 判定: 最小間隔未満での発音、または直前ノートが持続中の減衰再発音
+                is_rapid_repeat = gap < min_gap_sec
+                is_overlap_ghost = (n.start < last_note.end) and (n.velocity <= last_note.velocity * 1.05)
+
+                if is_rapid_repeat or is_overlap_ghost:
+                    # エコー・残響の跳ね返りと判定して直前ノートの終端を延長（タイ結合）
+                    last_note.end = max(last_note.end, n.end)
+                    removed_count += 1
+                else:
+                    last_note = n
+                    cleaned_notes.append(n)
+
+    # 全ノートを開始時刻順に再ソートして書き戻し
+    cleaned_notes.sort(key=lambda x: (x.start, x.pitch))
+    instrument.notes = cleaned_notes
+    return removed_count
+
+
 def transcribe_piano(
     audio_path: Union[str, Path],
     output_path: Optional[Union[str, Path]] = None,
@@ -112,6 +169,7 @@ def transcribe_piano(
     frame_threshold: float = 0.1,
     pedal_offset_threshold: float = 0.2,
     min_volume_db: Optional[float] = -45.0,
+    debounce_ms: Optional[int] = 120,
     tempo: Optional[Union[float, int, str, Path]] = 120.0,
     tempo_tolerance: float = 0.8,
     device: Optional[str] = None,
@@ -127,6 +185,7 @@ def transcribe_piano(
         frame_threshold: 音の持続判定閾値（0.0〜1.0、デフォルト: 0.1）
         pedal_offset_threshold: ペダル離鍵判定閾値（0.0〜1.0、デフォルト: 0.2）
         min_volume_db: ノイズゲート音量閾値（dB）。これ以下の微小音・無音区間のノートを除外
+        debounce_ms: エコー・残響による同一キー連打抑制ミリ秒（デフォルト: 120ms、0で無効）
         tempo: 出力MIDIのテンポBPM数値（例: 120, 140）またはテンポMIDI/解析元音声ファイルパス
         tempo_tolerance: テンポ解析元の音声からテンポ抽出する際の揺らぎ平滑化許容幅（BPM、デフォルト: 0.8）
         device: 実行デバイス ('cpu', 'cuda', 'mps' または None で自動選択)
@@ -173,6 +232,8 @@ def transcribe_piano(
     )
     if min_volume_db is not None:
         print(f"   ├─ ノイズゲート: {min_volume_db} dB 以下の微弱音を除外")
+    if debounce_ms is not None and debounce_ms > 0:
+        print(f"   ├─ 連打抑制 (デバウンス): {debounce_ms} ms 以内のエコー誤検知をマージ")
     if target_tempo_file is not None:
         print(f"   ├─ テンポ音源/MIDI: {target_tempo_file.name} (完了後にマージ)")
     else:
@@ -207,13 +268,24 @@ def transcribe_piano(
     print("   ├─ ニューラルネットワーク推論を実行中...")
     transcriber.transcribe(audio, str(output_file))
 
-    # ノイズゲート処理
-    if min_volume_db is not None and output_file.exists():
+    # 後処理（ノイズゲート ＆ 連打デバウンスフィルター）
+    if output_file.exists():
         pm = pretty_midi.PrettyMIDI(str(output_file))
+        modified = False
         for inst in pm.instruments:
             if not inst.is_drum:
-                filter_by_volume_gate(inst, audio, sr=sample_rate, min_volume_db=min_volume_db)
-        pm.write(str(output_file))
+                # 1. 音量ノイズゲート
+                if min_volume_db is not None:
+                    filter_by_volume_gate(inst, audio, sr=sample_rate, min_volume_db=min_volume_db)
+                    modified = True
+                # 2. エコー・残響による同一キー連打抑制（デバウンス）
+                if debounce_ms is not None and debounce_ms > 0:
+                    removed_notes = filter_debounce_notes(inst, debounce_ms=debounce_ms)
+                    if removed_notes > 0:
+                        print(f"   ├─ 🔇 [連打抑制] エコー/残響による重複ノート {removed_notes} 件をマージ除去しました")
+                    modified = True
+        if modified:
+            pm.write(str(output_file))
 
     # テンポ情報のマージ（テンポMIDI、音声ファイル、またはBPMが指定されている場合）
     if output_file.exists():

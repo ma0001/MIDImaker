@@ -11,6 +11,7 @@
 # 7. Step 6 のテンポMIDIを同期元にして、ドラムWAVからドラムMIDI (_drums.mid) を生成
 # 8. Step 6 のテンポMIDIを同期元にして、ベースWAVからベースMIDI (_bass.mid) を生成
 # 9. Step 6 のテンポMIDIを同期元にして、ピアノWAVからペダル付きピアノMIDI (_piano.mid) を生成
+#    ※ 連打抑制デバウンスフィルターにより、エコーや残響の跳ね返りによるゴーストノートを自動マージ除去
 # =============================================================================
 
 # 出力フォーマット (WAV / FLAC / MP3 など。デフォルト: WAV)
@@ -120,3 +121,8 @@ steps:
     input: "demucs_6s.piano"   # Step 4 で分離されたピアノWAVを入力！
     output_name: "{basename}_piano.mid"
     tempo: "tempo_track"       # 👈 Step 6 で出力されたテンポMIDIファイルを指定！
+    onset_threshold: 0.35      # アタック感度 (0.35でエコーの微弱な立ち上がりをスルー)
+    min_volume_db: -40.0       # ノイズゲート閾値 (微弱な残響・ゴーストノートを除外)
+    debounce_ms: 120           # 連打抑制フィルター (120ms以内のエコー跳ね返り重複ノートを自動タイマージ)
+
+
