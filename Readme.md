@@ -105,6 +105,12 @@ midimaker-separate "path/to/song.mp3"
 # 設定ファイルを指定して高度なパイプラインを実行（De-Echo/De-Reverb → ドラム特化＆ベース特化）
 midimaker separate "path/to/song.mp3" -c "configs/pipeline_default.yaml" -o "./stems"
 
+# 実行前に各ステップのパラメータと実行コマンド一覧をプレビュー（推論なしの高速チェック）
+midimaker separate -c "configs/pipeline_default.yaml" --dryrun
+
+# 音声ファイルを指定して実際のファイル名でコマンド一覧をシミュレーション
+midimaker separate "path/to/song.mp3" -c "configs/pipeline_default.yaml" --dryrun
+
 # おすすめモデル・エイリアス一覧を表示
 midimaker separate --list-models
 
@@ -119,6 +125,7 @@ midimaker separate --list-all
 | `-c`, `--config` | 省略（標準構成） | パイプライン設定ファイルパス (`.yaml`, `.toml`, `.json`) |
 | `-o`, `--output-dir` | 入力ファイルと同階層 | ステムWAVファイルおよびMIDIファイルの出力先ディレクトリ |
 | `-t`, `--tempo` | `input` (自動解析) | MIDIのテンポBPM数値（例: `120`）または外部テンポMIDI/音声ファイルパス（設定ファイル値を上書き） |
+| `--dryrun`, `--dry-run` | オフ | 実際の推論を行わず、各ステップの指定パラメータと単体実行コマンド一覧を表示 |
 | `--format` | `WAV` | 出力フォーマット (`WAV`, `FLAC`, `MP3`, `M4A`, `OGG`) |
 | `--model-dir` | `~/.cache/midimaker/models/` | モデルキャッシュ保存先ディレクトリ |
 | `--list-models` | - | おすすめモデルとエイリアス一覧を表示して終了 |

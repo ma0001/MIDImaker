@@ -311,6 +311,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="audio-separator が対応する全モデル一覧を表示して終了",
     )
+    separate_parser.add_argument(
+        "--dryrun", "--dry-run",
+        action="store_true",
+        dest="dryrun",
+        help="実際の推論・音源分離・MIDI生成を行わず、各ステップで指定されているパラメータと実行されるコマンドの一覧を表示する",
+    )
 
     return parser
 
@@ -397,10 +403,28 @@ def main() -> None:
             print_all_supported_models()
             sys.exit(0)
 
+        # dryrun オプション: 実際の推論を行わずに設定パラメータとコマンド一覧を出力
+        if args.dryrun:
+            try:
+                config = load_pipeline_config(args.config)
+                runner = StemPipelineRunner(
+                    config=config,
+                    output_dir=args.output_dir,
+                    output_format=args.format,
+                    model_file_dir=args.model_dir,
+                    tempo=args.tempo,
+                )
+                runner.dry_run(args.input)
+                sys.exit(0)
+            except Exception as e:
+                print(f"❌ エラーが発生しました: {e}", file=sys.stderr)
+                sys.exit(1)
+
         if not args.input:
             print("❌ エラー: 入力音声ファイルパスを指定してください。", file=sys.stderr)
             print("   例: midimaker separate input.mp3 -c configs/pipeline_default.yaml", file=sys.stderr)
             print("   (モデル一覧を見るには: midimaker separate --list-models)", file=sys.stderr)
+            print("   (コマンド一覧とパラメータを確認するには: midimaker separate --dryrun)", file=sys.stderr)
             sys.exit(1)
 
         try:

@@ -606,6 +606,7 @@ class StemPipelineRunner:
         input_ref: str,
         initial_input_path: Path,
         step_outputs: Dict[str, Dict[str, Any]],
+        allow_virtual: bool = False,
     ) -> Path:
         """
         ステップの入力参照（'input', 'step_name.stem', 'step_name' 等）から
@@ -651,7 +652,7 @@ class StemPipelineRunner:
 
         # ファイルパスが直接指定された場合
         direct_path = Path(input_ref)
-        if direct_path.exists():
+        if direct_path.exists() or allow_virtual:
             return direct_path
 
         raise ValueError(f"入力指定 '{input_ref}' を解決できませんでした。")
@@ -682,6 +683,48 @@ class StemPipelineRunner:
             stem_map[stem_name] = p
 
         return stem_map
+
+
+    def _determine_output_filename(
+        self,
+        step_name: str,
+        basename: str,
+        stem_name: str,
+        output_name_template: Optional[Union[str, Dict[str, str]]],
+        ext: Optional[str] = None,
+    ) -> str:
+        """
+        出力先ファイル名をテンプレートや拡張子に基づいて決定する。
+        """
+        stem_key_clean = stem_name.lower().replace(" ", "_")
+        target_ext = (ext or self.output_format).lower()
+
+        if isinstance(output_name_template, dict):
+            template = None
+            for k, v in output_name_template.items():
+                if k.lower() == stem_key_clean or k.lower() in stem_key_clean:
+                    template = str(v)
+                    break
+            if not template:
+                template = output_name_template.get("default", "{basename}_{stem}")
+            formatted_name = template.format(
+                basename=basename,
+                stem=stem_key_clean,
+                step=step_name,
+            )
+        elif isinstance(output_name_template, str) and output_name_template:
+            formatted_name = output_name_template.format(
+                basename=basename,
+                stem=stem_key_clean,
+                step=step_name,
+            )
+        else:
+            formatted_name = f"{basename}_{step_name}_{stem_key_clean}.{target_ext}"
+
+        if not formatted_name.lower().endswith(f".{target_ext}"):
+            formatted_name = f"{formatted_name}.{target_ext}"
+
+        return formatted_name
 
     def _publish_step_outputs(
         self,
@@ -734,36 +777,13 @@ class StemPipelineRunner:
             stems_to_publish = list(stem_map.items())
 
         for stem_name, src_file in stems_to_publish:
-            stem_key_clean = stem_name.lower().replace(" ", "_")
-
-            # 命名テンプレートの決定
-            if isinstance(output_name_template, dict):
-                # 辞書形式の場合、該当ステムのテンプレートを検索 (例: {"vocals": "...", "instrumental": "..."})
-                template = None
-                for k, v in output_name_template.items():
-                    if k.lower() == stem_key_clean or k.lower() in stem_key_clean:
-                        template = str(v)
-                        break
-                if not template:
-                    template = output_name_template.get("default", "{basename}_{stem}")
-
-                formatted_name = template.format(
-                    basename=basename,
-                    stem=stem_key_clean,
-                    step=step_name,
-                )
-            elif isinstance(output_name_template, str) and output_name_template:
-                formatted_name = output_name_template.format(
-                    basename=basename,
-                    stem=stem_key_clean,
-                    step=step_name,
-                )
-            else:
-                formatted_name = f"{basename}_{step_name}_{stem_key_clean}.{ext}"
-
-            if not formatted_name.lower().endswith(f".{ext}"):
-                formatted_name = f"{formatted_name}.{ext}"
-
+            formatted_name = self._determine_output_filename(
+                step_name=step_name,
+                basename=basename,
+                stem_name=stem_name,
+                output_name_template=output_name_template,
+                ext=ext,
+            )
             dest_path = target_output_dir / formatted_name
 
             # コピーして配置（元の一時ファイルは中間ステップで再利用される可能性があるためcopy）
@@ -771,6 +791,358 @@ class StemPipelineRunner:
             published.append(dest_path)
 
         return published
+
+    def dry_run(self, input_audio_path: Optional[str | Path] = None) -> None:
+        """
+        パイプラインの各ステップで実行される処理・指定パラメータ・等価なCLIコマンドをシミュレーションし、
+        一覧表示する。実際の推論やファイル生成は一切行わない。
+        """
+        if input_audio_path:
+            input_path = Path(input_audio_path)
+            input_is_real = input_path.exists()
+        else:
+            input_path = Path("input_audio.wav")
+            input_is_real = False
+
+        basename = input_path.stem
+        if self.output_dir:
+            target_output_dir = self.output_dir
+        elif input_is_real and input_path.parent != Path("."):
+            target_output_dir = input_path.parent
+        else:
+            target_output_dir = Path("./stems") if not input_is_real else input_path.parent
+
+        steps = self.config.get("steps", [])
+        simulated_step_outputs: Dict[str, Dict[str, Any]] = {}
+        batch_script_commands: List[Tuple[str, str]] = []
+
+        print("\n" + "=" * 80)
+        print("🔍 【DRY RUN】 MIDImaker パイプライン実行計画シミュレーション")
+        print("=" * 80)
+        print(f"🎵 入力音源: {input_path} {'(※仮のプレースホルダー)' if not input_is_real else ''}")
+        print(f"📁 出力ディレクトリ: {target_output_dir}")
+        print(f"📦 ステム出力形式: {self.output_format}")
+        if self.global_tempo is not None:
+            print(f"⏱️  共通テンポ設定: {self.global_tempo}")
+        print(f"⚙️  実行ステップ数: {len(steps)}")
+        print("=" * 80)
+
+        for idx, step in enumerate(steps, start=1):
+            step_name = step.get("name", f"step_{idx}")
+            step_type = (step.get("type") or step.get("action") or "separate").lower()
+
+            print(f"\n[Step {idx}/{len(steps)}] 🎯 '{step_name}' (種別: {step_type})")
+            print("-" * 80)
+
+            if step_type in ("separate", "audio", "stem"):
+                raw_model = step.get("model", "unknown")
+                model_filename = self.resolve_model(raw_model)
+                input_ref = step.get("input", "input")
+                target_stems = step.get("target_stems")
+                if isinstance(target_stems, str):
+                    target_stems = [target_stems]
+                output_name_template = step.get("output_name")
+
+                # 入力元解決
+                source_audio = self._resolve_step_input(
+                    input_ref=input_ref,
+                    initial_input_path=input_path,
+                    step_outputs=simulated_step_outputs,
+                    allow_virtual=True,
+                )
+
+                # 出力ファイル名のシミュレーション
+                simulated_stems = target_stems if target_stems else ["output"]
+                simulated_files: List[Path] = []
+                simulated_stem_map: Dict[str, Path] = {}
+
+                for s in simulated_stems:
+                    fn = self._determine_output_filename(
+                        step_name=step_name,
+                        basename=basename,
+                        stem_name=s,
+                        output_name_template=output_name_template,
+                        ext=self.output_format.lower(),
+                    )
+                    out_p = target_output_dir / fn
+                    simulated_files.append(out_p)
+                    simulated_stem_map[s] = out_p
+
+                simulated_step_outputs[step_name] = {
+                    "all_files": simulated_files,
+                    "stem_map": simulated_stem_map,
+                }
+
+                print(f"  • モデル: {model_filename} (指定エイリアス: {raw_model})")
+                print(f"  • 入力音源: {source_audio} (参照: {input_ref})")
+                print(f"  • 抽出対象ステム: {', '.join(simulated_stems)}")
+                print(f"  • 出力ファイル:")
+                for f in simulated_files:
+                    print(f"      └ {f}")
+
+                # 単体CLIコマンド生成 (audio-separator CLI 等価)
+                cmd = f'audio-separator "{source_audio}" --model_filename "{model_filename}" --output_format {self.output_format} --output_dir "{target_output_dir}"'
+                print(f"  • 単体実行コマンド (audio-separator 等価):")
+                print(f"    $ {cmd}")
+                batch_script_commands.append((f"Step {idx}: {step_name} (音源分離)", cmd))
+
+            elif step_type in ("drums_midi", "drums", "drum_midi", "drum"):
+                input_ref = step.get("input", "input")
+                source_audio = self._resolve_step_input(
+                    input_ref=input_ref,
+                    initial_input_path=input_path,
+                    step_outputs=simulated_step_outputs,
+                    allow_virtual=True,
+                )
+                step_tempo_ref = step.get("tempo")
+                resolved_tempo = self._resolve_step_tempo(
+                    step_tempo_ref=step_tempo_ref,
+                    initial_input_path=input_path,
+                    step_outputs=simulated_step_outputs,
+                )
+
+                output_template = step.get("output_name", "{basename}_drums.mid")
+                if isinstance(output_template, dict):
+                    output_template = output_template.get("midi", "{basename}_drums.mid")
+                formatted_midi_name = output_template.format(basename=basename, step=step_name)
+                if not formatted_midi_name.lower().endswith(".mid"):
+                    formatted_midi_name = f"{formatted_midi_name}.mid"
+                dest_midi_path = target_output_dir / formatted_midi_name
+
+                simulated_step_outputs[step_name] = {
+                    "all_files": [dest_midi_path],
+                    "stem_map": {"midi": dest_midi_path, "drums": dest_midi_path},
+                }
+
+                from_mix = step.get("from_mix", False)
+                threshold = step.get("threshold", -float("inf"))
+                min_volume_db = step.get("min_volume_db", -45.0)
+                tempo_tolerance = step.get("tempo_tolerance", 0.8)
+
+                print(f"  • 入力音源: {source_audio} (参照: {input_ref})")
+                if resolved_tempo is not None:
+                    print(f"  • テンポ同期: {resolved_tempo} (指定/参照: {step_tempo_ref or self.global_tempo})")
+                print(f"  • 出力ファイル: {dest_midi_path}")
+                print(f"  • 適用パラメータ:")
+                print(f"      - from_mix: {from_mix} (フルミックス入力判定)")
+                print(f"      - min_volume_db: {min_volume_db} dB (ノイズゲート閾値)")
+                print(f"      - threshold: {threshold} (Onset検出閾値)")
+                print(f"      - tempo_tolerance: {tempo_tolerance} BPM (テンポ平滑化許容幅)")
+
+                cmd_parts = [f'midimaker drums "{source_audio}"', f'-o "{dest_midi_path}"']
+                if resolved_tempo is not None:
+                    cmd_parts.append(f'-t "{resolved_tempo}"')
+                if from_mix:
+                    cmd_parts.append("--from-mix")
+                if min_volume_db is not None:
+                    cmd_parts.append(f"--min-volume-db {min_volume_db}")
+                if threshold != -float("inf"):
+                    cmd_parts.append(f"--threshold {threshold}")
+                if tempo_tolerance != 0.8:
+                    cmd_parts.append(f"--tempo-tolerance {tempo_tolerance}")
+
+                cmd = " ".join(cmd_parts)
+                print(f"  • 単体実行コマンド:")
+                print(f"    $ {cmd}")
+                batch_script_commands.append((f"Step {idx}: {step_name} (ドラムMIDI生成)", cmd))
+
+            elif step_type in ("bass_midi", "bass"):
+                input_ref = step.get("input", "input")
+                source_audio = self._resolve_step_input(
+                    input_ref=input_ref,
+                    initial_input_path=input_path,
+                    step_outputs=simulated_step_outputs,
+                    allow_virtual=True,
+                )
+                step_tempo_ref = step.get("tempo")
+                resolved_tempo = self._resolve_step_tempo(
+                    step_tempo_ref=step_tempo_ref,
+                    initial_input_path=input_path,
+                    step_outputs=simulated_step_outputs,
+                )
+
+                output_template = step.get("output_name", "{basename}_bass.mid")
+                if isinstance(output_template, dict):
+                    output_template = output_template.get("midi", "{basename}_bass.mid")
+                formatted_midi_name = output_template.format(basename=basename, step=step_name)
+                if not formatted_midi_name.lower().endswith(".mid"):
+                    formatted_midi_name = f"{formatted_midi_name}.mid"
+                dest_midi_path = target_output_dir / formatted_midi_name
+
+                simulated_step_outputs[step_name] = {
+                    "all_files": [dest_midi_path],
+                    "stem_map": {"midi": dest_midi_path, "bass": dest_midi_path},
+                }
+
+                onset_threshold = step.get("onset_threshold", 0.55)
+                frame_threshold = step.get("frame_threshold", 0.35)
+                min_note_length = step.get("min_note_length", 80.0)
+                min_freq = step.get("min_freq", 30.0)
+                max_freq = step.get("max_freq", 800.0)
+                min_volume_db = step.get("min_volume_db", -45.0)
+                monophonic = step.get("monophonic", True)
+                tempo_tolerance = step.get("tempo_tolerance", 0.8)
+
+                print(f"  • 入力音源: {source_audio} (参照: {input_ref})")
+                if resolved_tempo is not None:
+                    print(f"  • テンポ同期: {resolved_tempo} (指定/参照: {step_tempo_ref or self.global_tempo})")
+                print(f"  • 出力ファイル: {dest_midi_path}")
+                print(f"  • 適用パラメータ:")
+                print(f"      - onset_threshold: {onset_threshold} (アタック検出感度)")
+                print(f"      - frame_threshold: {frame_threshold} (持続判定感度)")
+                print(f"      - min_note_length: {min_note_length} ms (最小ノート長)")
+                print(f"      - min_freq: {min_freq} Hz (最低周波数)")
+                print(f"      - max_freq: {max_freq} Hz (最高周波数)")
+                print(f"      - min_volume_db: {min_volume_db} dB (ノイズゲート)")
+                print(f"      - monophonic: {monophonic} (単音化整形)")
+                print(f"      - tempo_tolerance: {tempo_tolerance} BPM (テンポ平滑化許容幅)")
+
+                cmd_parts = [f'midimaker bass "{source_audio}"', f'-o "{dest_midi_path}"']
+                if resolved_tempo is not None:
+                    cmd_parts.append(f'-t "{resolved_tempo}"')
+                cmd_parts.append(f"--onset-threshold {onset_threshold}")
+                cmd_parts.append(f"--frame-threshold {frame_threshold}")
+                cmd_parts.append(f"--min-note-length {min_note_length}")
+                cmd_parts.append(f"--min-freq {min_freq}")
+                cmd_parts.append(f"--max-freq {max_freq}")
+                if min_volume_db is not None:
+                    cmd_parts.append(f"--min-volume-db {min_volume_db}")
+                if not monophonic:
+                    cmd_parts.append("--no-monophonic")
+                if tempo_tolerance != 0.8:
+                    cmd_parts.append(f"--tempo-tolerance {tempo_tolerance}")
+
+                cmd = " ".join(cmd_parts)
+                print(f"  • 単体実行コマンド:")
+                print(f"    $ {cmd}")
+                batch_script_commands.append((f"Step {idx}: {step_name} (ベースMIDI生成)", cmd))
+
+            elif step_type in ("tempo_midi", "tempo"):
+                input_ref = step.get("input", "input")
+                source_audio = self._resolve_step_input(
+                    input_ref=input_ref,
+                    initial_input_path=input_path,
+                    step_outputs=simulated_step_outputs,
+                    allow_virtual=True,
+                )
+
+                output_template = step.get("output_name", "{basename}_tempo.mid")
+                formatted_midi_name = output_template.format(basename=basename, step=step_name)
+                if not formatted_midi_name.lower().endswith(".mid"):
+                    formatted_midi_name = f"{formatted_midi_name}.mid"
+                dest_midi_path = target_output_dir / formatted_midi_name
+
+                simulated_step_outputs[step_name] = {
+                    "all_files": [dest_midi_path],
+                    "stem_map": {"midi": dest_midi_path, "tempo": dest_midi_path},
+                }
+
+                fixed = step.get("fixed", False)
+                tolerance = step.get("tolerance", 0.8)
+
+                print(f"  • 入力音源: {source_audio} (参照: {input_ref})")
+                print(f"  • 出力ファイル: {dest_midi_path}")
+                print(f"  • 適用パラメータ:")
+                print(f"      - fixed: {fixed} ({'単一固定BPM' if fixed else 'テンポマップ可変追従'})")
+                print(f"      - tolerance: {tolerance} BPM (テンポ平滑化許容幅)")
+
+                cmd_parts = [f'midimaker tempo "{source_audio}"', f'-o "{dest_midi_path}"']
+                if fixed:
+                    cmd_parts.append("--fixed")
+                if tolerance != 0.8:
+                    cmd_parts.append(f"--tolerance {tolerance}")
+
+                cmd = " ".join(cmd_parts)
+                print(f"  • 単体実行コマンド:")
+                print(f"    $ {cmd}")
+                batch_script_commands.append((f"Step {idx}: {step_name} (テンポMIDI生成)", cmd))
+
+            elif step_type in ("piano_midi", "piano"):
+                input_ref = step.get("input", "input")
+                source_audio = self._resolve_step_input(
+                    input_ref=input_ref,
+                    initial_input_path=input_path,
+                    step_outputs=simulated_step_outputs,
+                    allow_virtual=True,
+                )
+                step_tempo_ref = step.get("tempo")
+                resolved_tempo = self._resolve_step_tempo(
+                    step_tempo_ref=step_tempo_ref,
+                    initial_input_path=input_path,
+                    step_outputs=simulated_step_outputs,
+                )
+
+                output_template = step.get("output_name", "{basename}_piano.mid")
+                if isinstance(output_template, dict):
+                    output_template = output_template.get("midi", "{basename}_piano.mid")
+                formatted_midi_name = output_template.format(basename=basename, step=step_name)
+                if not formatted_midi_name.lower().endswith(".mid"):
+                    formatted_midi_name = f"{formatted_midi_name}.mid"
+                dest_midi_path = target_output_dir / formatted_midi_name
+
+                simulated_step_outputs[step_name] = {
+                    "all_files": [dest_midi_path],
+                    "stem_map": {"midi": dest_midi_path, "piano": dest_midi_path},
+                }
+
+                onset_threshold = step.get("onset_threshold", 0.3)
+                frame_threshold = step.get("frame_threshold", 0.1)
+                pedal_threshold = step.get("pedal_threshold", 0.2)
+                min_volume_db = step.get("min_volume_db", -45.0)
+                debounce_ms = step.get("debounce_ms", 120)
+                tempo_tolerance = step.get("tempo_tolerance", 0.8)
+                device = step.get("device", "auto")
+                model_dir = step.get("model_dir")
+
+                print(f"  • 入力音源: {source_audio} (参照: {input_ref})")
+                if resolved_tempo is not None:
+                    print(f"  • テンポ同期: {resolved_tempo} (指定/参照: {step_tempo_ref or self.global_tempo})")
+                print(f"  • 出力ファイル: {dest_midi_path}")
+                print(f"  • 適用パラメータ:")
+                print(f"      - onset_threshold: {onset_threshold} (アタック感度)")
+                print(f"      - frame_threshold: {frame_threshold} (持続感度)")
+                print(f"      - pedal_threshold: {pedal_threshold} (ペダル離鍵感度)")
+                print(f"      - min_volume_db: {min_volume_db} dB (ノイズゲート)")
+                print(f"      - debounce_ms: {debounce_ms} ms (エコー連打抑制フィルター)")
+                print(f"      - tempo_tolerance: {tempo_tolerance} BPM (テンポ平滑化許容幅)")
+                print(f"      - device: {device}")
+                if model_dir:
+                    print(f"      - model_dir: {model_dir}")
+
+                cmd_parts = [f'midimaker piano "{source_audio}"', f'-o "{dest_midi_path}"']
+                if resolved_tempo is not None:
+                    cmd_parts.append(f'-t "{resolved_tempo}"')
+                cmd_parts.append(f"--onset-threshold {onset_threshold}")
+                cmd_parts.append(f"--frame-threshold {frame_threshold}")
+                cmd_parts.append(f"--pedal-threshold {pedal_threshold}")
+                if min_volume_db is not None:
+                    cmd_parts.append(f"--min-volume-db {min_volume_db}")
+                if debounce_ms:
+                    cmd_parts.append(f"--debounce-ms {debounce_ms}")
+                if tempo_tolerance != 0.8:
+                    cmd_parts.append(f"--tempo-tolerance {tempo_tolerance}")
+                if device != "auto":
+                    cmd_parts.append(f"--device {device}")
+                if model_dir:
+                    cmd_parts.append(f'--model-dir "{model_dir}"')
+
+                cmd = " ".join(cmd_parts)
+                print(f"  • 単体実行コマンド:")
+                print(f"    $ {cmd}")
+                batch_script_commands.append((f"Step {idx}: {step_name} (ピアノMIDI生成)", cmd))
+
+            else:
+                print(f"  ⚠️ 未知のステップ種別です: '{step_type}'")
+
+        # 最後にコピペ用スクリプト一覧を出力
+        print("\n" + "=" * 80)
+        print("📋 【コピペ用】 単体CLIコマンド一覧 (シェルスクリプト形式)")
+        print("=" * 80)
+        for label, cmd in batch_script_commands:
+            print(f"# {label}")
+            print(f"{cmd}\n")
+        print("=" * 80)
+        print("💡 ヒント: パイプライン設定ファイル (.yaml) の数値を変更して再実行すると、変更結果をすぐに確認できます！\n")
 
 
 # -----------------------------------------------------------------------------
